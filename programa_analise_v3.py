@@ -1898,7 +1898,8 @@ def world_cup_live_submenu():
         print("2 - 🛑 Índice de Pressão Dinâmico")
         print("3 - 🚨 Detector de Gol Avançado (Tendência)")
         print("4 - 📐 Detector de Escanteio (Mapeamento de Cantos)")
-        print("5 - ↩️ Voltar ao Menu da Partida")
+        print("5 - 📡 TRADING AO VIVO (Dashboard Automático)")
+        print("6 - ↩️ Voltar ao Menu da Partida")
 
         option = input("\nEscolha uma opção de monitoramento: ")
 
@@ -1925,6 +1926,11 @@ def world_cup_live_submenu():
         elif option == "4":
             corner_trend_detector(selected_match["fixture_id"])
         elif option == "5":
+            live_trading_dashboard(selected_match["fixture_id"],
+                                   selected_match["home_name"],
+                                   selected_match["away_name"],
+                                   selected_match["home_id"])
+        elif option == "6":
             break
 
 
@@ -3187,6 +3193,538 @@ def execute_advanced_pre_live_analysis_v3():
     print("✅ ANÁLISE V3 PRO CONCLUÍDA")
     print("=" * 70)
     input("\nPressione ENTER para retornar ao menu da partida...")
+
+
+# =====================================================================
+# MÓDULO TRADING AO VIVO — DASHBOARD AUTOMÁTICO DE SINAIS
+# =====================================================================
+#
+# Lógica central: polling a cada POLL_INTERVAL segundos.
+# A cada ciclo, captura um snapshot das estatísticas ao vivo.
+# Mantém histórico dos últimos HISTORY_SIZE snapshots.
+# Calcula DELTAS entre snapshots para detectar aceleração de pressão.
+# Gera sinais de GOL / ESCANTEIO / CARTÃO com força (1-5 estrelas).
+#
+# Limitação da API: /fixtures/statistics retorna apenas o acumulado
+# total do jogo (não por minuto). A minutagem vem de /fixtures ao vivo
+# (campo status.elapsed). O "por minuto" é inferido pelos deltas entre
+# polls consecutivos — quanto mudou desde o último ciclo.
+
+import time as _time_module
+import os as _os_module
+
+# Constantes do trading dashboard
+POLL_INTERVAL = 30        # segundos entre consultas (respeita rate limit da API)
+HISTORY_SIZE  = 8         # snapshots mantidos em memória (~4 minutos de histórico)
+CLEAR_SCREEN  = True      # False se o terminal não suportar ANSI
+
+
+def _clear():
+    if CLEAR_SCREEN:
+        print("\033[H\033[J", end="", flush=True)
+
+
+def _fetch_live_fixture(fixture_id):
+    """Busca o estado atual da partida: placar, minuto, status."""
+    try:
+        res = requests.get(
+            f"{BASE_URL}/fixtures",
+            headers=headers,
+            params={"id": fixture_id}
+        ).json()
+        data = res.get("response", [])
+        if not data:
+            return None
+        f = data[0]
+        return {
+            "minute":  f["fixture"]["status"].get("elapsed") or 0,
+            "status":  f["fixture"]["status"].get("short", "?"),
+            "score_h": f["goals"].get("home") or 0,
+            "score_a": f["goals"].get("away") or 0,
+        }
+    except Exception:
+        return None
+
+
+def _fetch_live_events(fixture_id):
+    """Busca eventos ao vivo (gols, cartões, substituições)."""
+    try:
+        res = requests.get(
+            f"{BASE_URL}/fixtures/events",
+            headers=headers,
+            params={"fixture": fixture_id}
+        ).json()
+        return res.get("response", [])
+    except Exception:
+        return []
+
+
+def _snapshot(fixture_id, home_id):
+    """
+    Captura um snapshot completo do momento atual:
+    estatísticas brutas + minuto + eventos novos.
+    Retorna dict padronizado ou None se API falhar.
+    """
+    stats = get_fixture_statistics(fixture_id)
+    live  = _fetch_live_fixture(fixture_id)
+    if not stats or len(stats) < 2 or not live:
+        return None
+
+    # Identifica bloco mandante/visitante pelos IDs
+    if int(stats[0]["team"]["id"]) == int(home_id):
+        hb, ab = stats[0], stats[1]
+    else:
+        hb, ab = stats[1], stats[0]
+
+    def _v(block, key):
+        return extract_stat_value(block, key)
+
+    return {
+        "ts":            _time_module.time(),
+        "minute":        live["minute"],
+        "status":        live["status"],
+        "score_h":       live["score_h"],
+        "score_a":       live["score_a"],
+        # Mandante
+        "h_shots":       _v(hb, "Total Shots"),
+        "h_sot":         _v(hb, "Shots on Goal"),
+        "h_blocked":     _v(hb, "Blocked Shots"),
+        "h_woodwork":    _v(hb, "Hit Woodwork"),
+        "h_corners":     _v(hb, "Corner Kicks"),
+        "h_fouls":       _v(hb, "Fouls"),
+        "h_yellow":      _v(hb, "Yellow Cards"),
+        "h_red":         _v(hb, "Red Cards"),
+        "h_dangerous":   _v(hb, "Dangerous Attacks"),
+        "h_attacks":     _v(hb, "Attacks"),
+        "h_off_goal":    _v(hb, "Shots Off Goal"),
+        "h_possession":  _v(hb, "Ball Possession"),
+        "h_passes_acc":  _v(hb, "Passes accurate"),
+        # Visitante
+        "a_shots":       _v(ab, "Total Shots"),
+        "a_sot":         _v(ab, "Shots on Goal"),
+        "a_blocked":     _v(ab, "Blocked Shots"),
+        "a_woodwork":    _v(ab, "Hit Woodwork"),
+        "a_corners":     _v(ab, "Corner Kicks"),
+        "a_fouls":       _v(ab, "Fouls"),
+        "a_yellow":      _v(ab, "Yellow Cards"),
+        "a_red":         _v(ab, "Red Cards"),
+        "a_dangerous":   _v(ab, "Dangerous Attacks"),
+        "a_attacks":     _v(ab, "Attacks"),
+        "a_off_goal":    _v(ab, "Shots Off Goal"),
+        "a_possession":  _v(ab, "Ball Possession"),
+        "a_passes_acc":  _v(ab, "Passes accurate"),
+    }
+
+
+def _delta(new, old):
+    """
+    Calcula o delta (variação) entre dois snapshots.
+    Retorna dict com campos prefixados por 'd_'.
+    """
+    keys = [
+        "h_shots","h_sot","h_blocked","h_corners","h_fouls",
+        "h_yellow","h_red","h_dangerous","h_attacks","h_off_goal",
+        "a_shots","a_sot","a_blocked","a_corners","a_fouls",
+        "a_yellow","a_red","a_dangerous","a_attacks","a_off_goal",
+    ]
+    return {f"d_{k}": max(0, new.get(k, 0) - old.get(k, 0)) for k in keys}
+
+
+# ── SINAIS DE TRADING ─────────────────────────────────────────────────
+
+def _signal_goal(snap, hist, h_name, a_name):
+    """
+    Avalia probabilidade de gol iminente em 5 min.
+    Usa pressão acumulada + aceleração recente (delta dos últimos 2 ciclos).
+    Retorna lista de sinais formatados.
+    """
+    signals = []
+
+    # Pressão acumulada (UPI — igual ao módulo existente)
+    h_upi = (snap["h_shots"]*2 + snap["h_sot"]*4 + snap["h_blocked"]*2
+             + snap["h_woodwork"]*5 + snap["h_corners"]*3)
+    a_upi = (snap["a_shots"]*2 + snap["a_sot"]*4 + snap["a_blocked"]*2
+             + snap["a_woodwork"]*5 + snap["a_corners"]*3)
+
+    # Aceleração: delta dos últimos 2 snapshots (se houver histórico)
+    accel_h = accel_a = 0
+    if len(hist) >= 2:
+        d1 = _delta(snap, hist[-1])
+        accel_h = d1["d_h_sot"]*4 + d1["d_h_shots"]*2 + d1["d_h_dangerous"]*1
+        accel_a = d1["d_a_sot"]*4 + d1["d_a_shots"]*2 + d1["d_a_dangerous"]*1
+
+    # Aceleração dupla (últimos 3 snapshots)
+    accel2_h = accel2_a = 0
+    if len(hist) >= 3:
+        d2 = _delta(hist[-1], hist[-2])
+        accel2_h = d2["d_h_sot"]*4 + d2["d_h_shots"]*2
+        accel2_a = d2["d_a_sot"]*4 + d2["d_a_shots"]*2
+
+    trend_h = (accel_h > 0 and accel_h >= accel2_h)  # pressão crescendo
+    trend_a = (accel_a > 0 and accel_a >= accel2_a)
+
+    # Pressão xG proxy (chutes no alvo / 4.5)
+    xg_h = round(snap["h_sot"] / 4.5, 2)
+    xg_a = round(snap["a_sot"] / 4.5, 2)
+
+    # Score combinado para sinal
+    score_h = h_upi * 0.6 + accel_h * 10 + (5 if trend_h else 0)
+    score_a = a_upi * 0.6 + accel_a * 10 + (5 if trend_a else 0)
+
+    def _stars(s):
+        if s >= 80: return "★★★★★ ELITE"
+        if s >= 55: return "★★★★☆ FORTE"
+        if s >= 35: return "★★★☆☆ MODERADO"
+        if s >= 18: return "★★☆☆☆ FRACO"
+        return None
+
+    for team, score, upi, accel, trend, xg in [
+        (h_name, score_h, h_upi, accel_h, trend_h, xg_h),
+        (a_name, score_a, a_upi, accel_a, trend_a, xg_a),
+    ]:
+        label = _stars(score)
+        if label:
+            arrow = "↑↑" if trend else "→"
+            signals.append({
+                "type": "GOL",
+                "team": team,
+                "strength": label,
+                "detail": f"UPI={upi} | Aceleração={accel} {arrow} | xG~{xg}",
+                "score": score,
+            })
+
+    return sorted(signals, key=lambda x: x["score"], reverse=True)
+
+
+def _signal_corner(snap, hist, h_name, a_name):
+    """
+    Avalia probabilidade de escanteio iminente.
+    Base: chutes bloqueados + chutes para fora + ataques perigosos recentes.
+    """
+    signals = []
+
+    for team, prefix, name in [("H", "h_", h_name), ("A", "a_", a_name)]:
+        blocked   = snap[f"{prefix}blocked"]
+        off_goal  = snap[f"{prefix}off_goal"]
+        corners   = snap[f"{prefix}corners"]
+        dangerous = snap[f"{prefix}dangerous"]
+
+        # Número de chutes "candidatos a escanteio" ainda não convertidos
+        candidate_ratio = (blocked + off_goal) / max(corners + 1, 1)
+
+        # Delta recente de chutes bloqueados (momento atual)
+        d_blocked = 0
+        if len(hist) >= 1:
+            d = _delta(snap, hist[-1])
+            d_blocked = d[f"d_{prefix}blocked"] + d[f"d_{prefix}off_goal"]
+
+        ivl = blocked * 2.5 + off_goal * 1.2 + corners * 0.8 + d_blocked * 4
+
+        if ivl >= 30 and candidate_ratio >= 1.5:
+            strength = "★★★★★ ELITE" if ivl >= 55 else "★★★★☆ FORTE"
+        elif ivl >= 18:
+            strength = "★★★☆☆ MODERADO"
+        elif ivl >= 10:
+            strength = "★★☆☆☆ FRACO"
+        else:
+            continue
+
+        signals.append({
+            "type": "ESCANTEIO",
+            "team": name,
+            "strength": strength,
+            "detail": (f"Bloqueados={blocked} | Fora={off_goal} | "
+                       f"Cantos={corners} | Δ recente={d_blocked} | IVL={ivl:.0f}"),
+            "score": ivl,
+        })
+
+    return sorted(signals, key=lambda x: x["score"], reverse=True)
+
+
+def _signal_card(snap, hist, h_name, a_name, minute):
+    """
+    Avalia probabilidade de cartão iminente.
+    Fatores: volume de faltas no período recente + tensão do jogo (placar, minuto).
+    """
+    signals = []
+
+    score_diff = abs(snap["score_h"] - snap["score_a"])
+    losing_team_pressure = (
+        (snap["score_h"] < snap["score_a"] and snap["h_dangerous"] > snap["a_dangerous"])
+        or
+        (snap["score_a"] < snap["score_h"] and snap["a_dangerous"] > snap["h_dangerous"])
+    )
+    # Minuto crítico: 75-90 com time perdendo gera mais faltas táticas
+    critical_minute = minute >= 75
+
+    for prefix, name in [("h_", h_name), ("a_", a_name)]:
+        fouls   = snap[f"{prefix}fouls"]
+        yellows = snap[f"{prefix}yellow"]
+
+        # Taxa de faltas acumuladas
+        foul_rate = fouls / max(minute, 1) * 90  # projeção para 90 min
+
+        # Delta de faltas recentes
+        d_fouls = 0
+        if len(hist) >= 1:
+            d = _delta(snap, hist[-1])
+            d_fouls = d[f"d_{prefix}fouls"]
+
+        # Score de risco de cartão
+        card_score = (
+            foul_rate * 0.4
+            + d_fouls * 5
+            + yellows * 8          # 2º amarelo iminente
+            + (10 if critical_minute else 0)
+            + (8 if losing_team_pressure else 0)
+            + (5 if score_diff >= 2 else 0)
+        )
+
+        if card_score >= 50:
+            strength = "★★★★★ ALTO RISCO" if card_score >= 75 else "★★★★☆ RISCO ELEVADO"
+        elif card_score >= 30:
+            strength = "★★★☆☆ RISCO MODERADO"
+        elif card_score >= 18:
+            strength = "★★☆☆☆ RISCO BAIXO"
+        else:
+            continue
+
+        signals.append({
+            "type": "CARTÃO",
+            "team": name,
+            "strength": strength,
+            "detail": (f"Faltas={fouls} (proj/90={foul_rate:.0f}) | "
+                       f"Δ recente={d_fouls} | Amarelos={yellows} | "
+                       f"Min={minute}{'🔴' if critical_minute else ''}"),
+            "score": card_score,
+        })
+
+    return sorted(signals, key=lambda x: x["score"], reverse=True)
+
+
+def _render_bar(value, max_val, width=20, char="█"):
+    """Renderiza uma barra de progresso ASCII para o painel."""
+    filled = int((value / max(max_val, 1)) * width)
+    filled = min(filled, width)
+    return char * filled + "░" * (width - filled)
+
+
+def _render_dashboard(snap, hist, h_name, a_name, home_id,
+                       goal_sigs, corner_sigs, card_sigs,
+                       poll_count, next_poll_in):
+    """Renderiza o painel de trading completo no terminal."""
+    _clear()
+
+    minute  = snap["minute"]
+    status  = snap["status"]
+    score_h = snap["score_h"]
+    score_a = snap["score_a"]
+
+    # ── HEADER ────────────────────────────────────────────────────────
+    print("╔" + "═"*68 + "╗")
+    print(f"║  📡  TRADING AO VIVO — {h_name} x {a_name}".ljust(69) + "║")
+    print(f"║  ⏱  {minute}' [{status}]  |  Placar: {score_h} x {score_a}  |  Ciclo #{poll_count}  |  Próx. atualização: {next_poll_in}s".ljust(69) + "║")
+    print("╠" + "═"*68 + "╣")
+
+    # ── PAINEL DE ESTATÍSTICAS ────────────────────────────────────────
+    h_upi = snap["h_shots"]*2 + snap["h_sot"]*4 + snap["h_blocked"]*2 + snap["h_woodwork"]*5 + snap["h_corners"]*3
+    a_upi = snap["a_shots"]*2 + snap["a_sot"]*4 + snap["a_blocked"]*2 + snap["a_woodwork"]*5 + snap["a_corners"]*3
+    max_upi = max(h_upi, a_upi, 1)
+
+    print(f"║  {'ESTATÍSTICA':<22} {'MANDANTE':>12} {'':^8} {'VISITANTE':<12}  ║")
+    print("║" + "─"*68 + "║")
+
+    def _stat_row(label, h_val, a_val, max_v=None):
+        mv = max_v or max(h_val, a_val, 1)
+        h_bar = _render_bar(h_val, mv, 8)
+        a_bar = _render_bar(a_val, mv, 8)
+        print(f"║  {label:<22} {h_val:>4} {h_bar}  {a_bar} {a_val:<4}  ║")
+
+    _stat_row("Pressão (UPI)",     h_upi,               a_upi)
+    _stat_row("Chutes Totais",     snap["h_shots"],      snap["a_shots"])
+    _stat_row("No Alvo",          snap["h_sot"],        snap["a_sot"])
+    _stat_row("Bloqueados",       snap["h_blocked"],    snap["a_blocked"])
+    _stat_row("Para Fora",        snap["h_off_goal"],   snap["a_off_goal"])
+    _stat_row("Escanteios",       snap["h_corners"],    snap["a_corners"])
+    _stat_row("Ataques Perig.",   snap["h_dangerous"],  snap["a_dangerous"])
+    _stat_row("Faltas",           snap["h_fouls"],      snap["a_fouls"])
+    _stat_row("Cartões Amarelos", snap["h_yellow"],     snap["a_yellow"])
+    _stat_row("Cartões Vermelhos",snap["h_red"],        snap["a_red"])
+
+    # ── DELTA DO ÚLTIMO CICLO ─────────────────────────────────────────
+    print("╠" + "═"*68 + "╣")
+    print(f"║  VARIAÇÃO NO ÚLTIMO CICLO (~{POLL_INTERVAL}s)".ljust(69) + "║")
+    if len(hist) >= 1:
+        d = _delta(snap, hist[-1])
+        changes = []
+        for key, label in [
+            ("d_h_sot",       f"🎯 Finalizações no alvo {h_name}"),
+            ("d_a_sot",       f"🎯 Finalizações no alvo {a_name}"),
+            ("d_h_corners",   f"🚩 Escanteios {h_name}"),
+            ("d_a_corners",   f"🚩 Escanteios {a_name}"),
+            ("d_h_yellow",    f"🟨 Amarelo {h_name}"),
+            ("d_a_yellow",    f"🟨 Amarelo {a_name}"),
+            ("d_h_red",       f"🟥 Vermelho {h_name}"),
+            ("d_a_red",       f"🟥 Vermelho {a_name}"),
+            ("d_h_dangerous", f"⚡ At.Perig. {h_name}"),
+            ("d_a_dangerous", f"⚡ At.Perig. {a_name}"),
+        ]:
+            if d.get(key, 0) > 0:
+                changes.append(f"+{d[key]} {label}")
+        if changes:
+            for c in changes:
+                print(f"║    {c}".ljust(69) + "║")
+        else:
+            print(f"║    Sem alterações detectadas neste ciclo.".ljust(69) + "║")
+    else:
+        print(f"║    (Aguardando 2º ciclo para calcular deltas)".ljust(69) + "║")
+
+    # ── SINAIS DE TRADING ─────────────────────────────────────────────
+    print("╠" + "═"*68 + "╣")
+    print(f"║  🚦 SINAIS DE TRADING".ljust(69) + "║")
+    print("║" + "─"*68 + "║")
+
+    all_signals = (
+        [(s, "GOL")       for s in goal_sigs]   +
+        [(s, "ESCANTEIO") for s in corner_sigs] +
+        [(s, "CARTÃO")    for s in card_sigs]
+    )
+
+    if all_signals:
+        for sig, _ in sorted(all_signals, key=lambda x: x[0]["score"], reverse=True):
+            icon = {"GOL": "⚽", "ESCANTEIO": "🚩", "CARTÃO": "🟨"}.get(sig["type"], "•")
+            header_line = f"  {icon} [{sig['type']}] {sig['team']} — {sig['strength']}"
+            detail_line = f"     {sig['detail']}"
+            print(f"║{header_line}".ljust(69) + "║")
+            print(f"║{detail_line}".ljust(69) + "║")
+    else:
+        print(f"║    ⚪ Nenhum sinal relevante no momento.".ljust(69) + "║")
+
+    # ── ALERTAS CRÍTICOS ─────────────────────────────────────────────
+    critical = [s for s in all_signals if "★★★★★" in s[0]["strength"]]
+    if critical:
+        print("╠" + "═"*68 + "╣")
+        print(f"║  🔴 ALERTAS CRÍTICOS".ljust(69) + "║")
+        for sig, _ in critical:
+            icon = {"GOL": "⚽", "ESCANTEIO": "🚩", "CARTÃO": "🟨"}.get(sig["type"], "•")
+            print(f"║  {icon}  SINAL ELITE — {sig['type']} {sig['team']}".ljust(69) + "║")
+
+    # ── HISTÓRICO DE PRESSÃO (MINI-GRÁFICO) ──────────────────────────
+    if len(hist) >= 2:
+        print("╠" + "═"*68 + "╣")
+        print(f"║  📊 HISTÓRICO UPI (últimos {len(hist)+1} ciclos)".ljust(69) + "║")
+        all_upis_h = [
+            s["h_shots"]*2 + s["h_sot"]*4 + s["h_blocked"]*2 + s["h_corners"]*3
+            for s in hist
+        ] + [h_upi]
+        all_upis_a = [
+            s["a_shots"]*2 + s["a_sot"]*4 + s["a_blocked"]*2 + s["a_corners"]*3
+            for s in hist
+        ] + [a_upi]
+        h_trend = " ".join(str(v) for v in all_upis_h[-6:])
+        a_trend = " ".join(str(v) for v in all_upis_a[-6:])
+        print(f"║  {h_name[:18]:<18}: [{h_trend}] →{h_upi}".ljust(69) + "║")
+        print(f"║  {a_name[:18]:<18}: [{a_trend}] →{a_upi}".ljust(69) + "║")
+
+    print("╠" + "═"*68 + "╣")
+    print(f"║  [Q] Sair do dashboard   Intervalo de polling: {POLL_INTERVAL}s".ljust(69) + "║")
+    print("╚" + "═"*68 + "╝")
+
+
+def live_trading_dashboard(fixture_id, h_name, a_name, home_id):
+    """
+    Loop principal do dashboard de trading ao vivo.
+    Atualiza automaticamente a cada POLL_INTERVAL segundos.
+    Digite 'q' + ENTER para sair.
+    """
+    import select as _select
+    import sys as _sys
+
+    print("\n📡 Iniciando Trading Dashboard...")
+    print(f"   Partida: {h_name} x {a_name}  |  Fixture ID: {fixture_id}")
+    print(f"   Atualização automática a cada {POLL_INTERVAL} segundos.")
+    print("   Digite 'q' + ENTER a qualquer momento para sair.\n")
+    _time_module.sleep(1)
+
+    history = []     # lista de snapshots anteriores
+    poll_count = 0
+    signal_log = []  # log histórico de todos os sinais emitidos
+
+    while True:
+        poll_count += 1
+        snap = _snapshot(fixture_id, home_id)
+
+        if snap is None:
+            _clear()
+            print(f"\n⚠️  [{poll_count}] API indisponível ou partida não iniciada/encerrada.")
+            print(f"   Status da partida: verificando em {POLL_INTERVAL}s...")
+            print("   Digite 'q' + ENTER para sair.")
+        else:
+            # Calcula sinais com base no snapshot + histórico
+            goal_sigs   = _signal_goal(snap, history, h_name, a_name)
+            corner_sigs = _signal_corner(snap, history, h_name, a_name)
+            card_sigs   = _signal_card(snap, history, h_name, a_name, snap["minute"])
+
+            # Loga sinais críticos com timestamp para revisão pós-jogo
+            for s in goal_sigs + corner_sigs + card_sigs:
+                if "★★★★" in s["strength"]:
+                    signal_log.append({
+                        "minute": snap["minute"],
+                        "type":   s["type"],
+                        "team":   s["team"],
+                        "strength": s["strength"],
+                        "score":  s["score"],
+                    })
+
+            # Renderiza painel
+            _render_dashboard(snap, history, h_name, a_name, home_id,
+                              goal_sigs, corner_sigs, card_sigs,
+                              poll_count, POLL_INTERVAL)
+
+            # Mantém histórico limitado
+            history.append(snap)
+            if len(history) > HISTORY_SIZE:
+                history.pop(0)
+
+            # Detecta fim de jogo
+            if snap["status"] in ("FT", "AET", "PEN", "FT_PEN"):
+                print(f"\n🏁 Jogo encerrado! Status: {snap['status']}")
+                _print_signal_log(signal_log)
+                input("ENTER para voltar ao menu.")
+                return
+
+        # Countdown interativo com verificação de saída
+        for remaining in range(POLL_INTERVAL, 0, -1):
+            # Atualiza contador na última linha sem re-renderizar tudo
+            print(f"\r   ⏳ Próxima atualização em {remaining:2d}s  [Digite 'q' + ENTER para sair]", end="", flush=True)
+            _time_module.sleep(1)
+
+            # Verifica se usuário quer sair (não-bloqueante)
+            try:
+                ready, _, _ = _select.select([_sys.stdin], [], [], 0)
+                if ready:
+                    user_input = _sys.stdin.readline().strip().lower()
+                    if user_input == "q":
+                        print("\n\n📋 Encerrando dashboard...")
+                        _print_signal_log(signal_log)
+                        input("ENTER para voltar ao menu.")
+                        return
+            except Exception:
+                pass  # select não disponível em todos os ambientes
+
+
+def _print_signal_log(signal_log):
+    """Imprime o log de todos os sinais fortes emitidos durante o jogo."""
+    if not signal_log:
+        print("\n📋 Nenhum sinal forte registrado durante o monitoramento.")
+        return
+    print(f"\n{'='*60}")
+    print(f"📋 LOG DE SINAIS FORTES ({len(signal_log)} alertas emitidos)")
+    print(f"{'='*60}")
+    for entry in signal_log:
+        icon = {"GOL": "⚽", "ESCANTEIO": "🚩", "CARTÃO": "🟨"}.get(entry["type"], "•")
+        print(f"  {icon} {entry['minute']:3d}' | {entry['type']:<10} | {entry['team']:<20} | {entry['strength']}")
+    print(f"{'='*60}")
 
 
 # =====================================================================
