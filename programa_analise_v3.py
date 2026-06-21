@@ -3621,7 +3621,7 @@ def _render_bar(value, max_val, width=20, char="█"):
 
 def _render_dashboard(snap, hist, h_name, a_name, home_id,
                        goal_sigs, corner_sigs, card_sigs,
-                       poll_count, next_poll_in):
+                       poll_count, next_poll_in, consciousness=None):
     """Renderiza o painel de trading completo no terminal."""
     _clear()
 
@@ -3736,6 +3736,10 @@ def _render_dashboard(snap, hist, h_name, a_name, home_id,
         print(f"║  {h_name[:18]:<18}: [{h_trend}] →{h_upi}".ljust(69) + "║")
         print(f"║  {a_name[:18]:<18}: [{a_trend}] →{a_upi}".ljust(69) + "║")
 
+    # ── CONSCIÊNCIA PREDITIVA ─────────────────────────────────────────
+    if consciousness:
+        _render_consciousness_panel(consciousness)
+
     # ── DIAGNÓSTICO DE STATS (ativado via DIAG_MODE = True) ──────────
     if DIAG_MODE:
         print("╠" + "═"*68 + "╣")
@@ -3783,25 +3787,36 @@ def live_trading_dashboard(fixture_id, h_name, a_name, home_id):
             print("   Digite 'q' + ENTER para sair.")
         else:
             # Calcula sinais com base no snapshot + histórico
-            goal_sigs   = _signal_goal(snap, history, h_name, a_name)
-            corner_sigs = _signal_corner(snap, history, h_name, a_name)
-            card_sigs   = _signal_card(snap, history, h_name, a_name, snap["minute"])
+            goal_sigs    = _signal_goal(snap, history, h_name, a_name)
+            corner_sigs  = _signal_corner(snap, history, h_name, a_name)
+            card_sigs    = _signal_card(snap, history, h_name, a_name, snap["minute"])
+            consciousness = _game_consciousness(snap, history, h_name, a_name)
 
             # Loga sinais críticos com timestamp para revisão pós-jogo
             for s in goal_sigs + corner_sigs + card_sigs:
                 if "★★★★" in s["strength"]:
                     signal_log.append({
-                        "minute": snap["minute"],
-                        "type":   s["type"],
-                        "team":   s["team"],
+                        "minute":   snap["minute"],
+                        "type":     s["type"],
+                        "team":     s["team"],
                         "strength": s["strength"],
-                        "score":  s["score"],
+                        "score":    s["score"],
+                    })
+            # Loga também eventos de consciência críticos
+            for c in consciousness["clusters"]:
+                if c.get("urgency") in ("crítica", "muito alta"):
+                    signal_log.append({
+                        "minute":   snap["minute"],
+                        "type":     c["type"],
+                        "team":     c["team"],
+                        "strength": f"⚡ {c['urgency'].upper()}",
+                        "score":    99,
                     })
 
             # Renderiza painel
             _render_dashboard(snap, history, h_name, a_name, home_id,
                               goal_sigs, corner_sigs, card_sigs,
-                              poll_count, POLL_INTERVAL)
+                              poll_count, POLL_INTERVAL, consciousness)
 
             # Mantém histórico limitado
             history.append(snap)
@@ -3833,6 +3848,505 @@ def live_trading_dashboard(fixture_id, h_name, a_name, home_id):
                         return
             except Exception:
                 pass  # select não disponível em todos os ambientes
+
+
+# =====================================================================
+# CONSCIÊNCIA PREDITIVA DO JOGO — PROJEÇÃO DOS PRÓXIMOS 10-15 MINUTOS
+# =====================================================================
+#
+# Camada analítica que sintetiza o estado atual do jogo em um modelo
+# preditivo de curto prazo. Diferente dos sinais de trading (que detectam
+# eventos imediatos), esta camada responde à pergunta: "dado como o jogo
+# evoluiu até agora, o que provavelmente acontece nos próximos 10 minutos?"
+#
+# Componentes:
+#   1. Fase do jogo       → taxa histórica de eventos por período
+#   2. Curva de momentum  → regressão linear no histórico de UPI
+#   3. Estado do placar   → comportamento dos times em cada configuração
+#   4. Fadiga ofensiva    → pressão alta sem conversão = risco de reação
+#   5. Clustering         → eventos tendem a ocorrer em cascata
+#   6. Predições numéricas → prob. de gol/escanteio/cartão nos próx. 10 min
+#   7. Narrativa          → síntese textual automática do estado do jogo
+
+
+def _linear_slope(values):
+    """
+    Regressão linear simples sobre uma série de valores.
+    Retorna o coeficiente angular (slope): positivo = crescendo, negativo = caindo.
+    Usado para detectar se o momentum está acelerando ou desacelerando.
+    """
+    n = len(values)
+    if n < 2:
+        return 0.0
+    xs = list(range(n))
+    x_mean = sum(xs) / n
+    y_mean = sum(values) / n
+    num = sum((xs[i] - x_mean) * (values[i] - y_mean) for i in range(n))
+    den = sum((xs[i] - x_mean) ** 2 for i in range(n))
+    return round(num / den, 3) if den != 0 else 0.0
+
+
+def _get_game_phase(minute):
+    """
+    Classifica a fase do jogo e retorna multiplicadores de probabilidade
+    baseados em dados históricos de futebol de elite.
+
+    Taxas de gol por fase (média de grandes ligas/Copa do Mundo):
+      0-15:  0.22 gols/15min  — início, equipes organizadas
+      16-30: 0.28 gols/15min  — jogo abre
+      31-45: 0.35 gols/15min  — pré-intervalo, pico de urgência
+      46-60: 0.32 gols/15min  — reset de segundo tempo
+      61-75: 0.30 gols/15min  — fadiga começa
+      76-90: 0.45 gols/15min  — zona crítica, maior taxa do jogo
+      90+:   0.60 gols/15min  — acréscimos, altíssima urgência
+    """
+    if minute <= 15:
+        return {"phase": "Início de jogo",         "window": "0-15",
+                "goal_rate": 0.22, "corner_rate": 0.80, "card_rate": 0.10,
+                "emoji": "🌅", "desc": "Times se posicionando, ritmo ainda baixo."}
+    elif minute <= 30:
+        return {"phase": "Jogo abrindo",           "window": "16-30",
+                "goal_rate": 0.28, "corner_rate": 1.00, "card_rate": 0.15,
+                "emoji": "📈", "desc": "Volume ofensivo crescendo, equilíbrio se rompendo."}
+    elif minute <= 45:
+        return {"phase": "Pressão pré-intervalo",  "window": "31-45",
+                "goal_rate": 0.35, "corner_rate": 1.10, "card_rate": 0.20,
+                "emoji": "⚡", "desc": "Pico de urgência antes do descanso — gols muito prováveis."}
+    elif minute <= 60:
+        return {"phase": "Reinício do 2º tempo",   "window": "46-60",
+                "goal_rate": 0.32, "corner_rate": 1.05, "card_rate": 0.18,
+                "emoji": "🔄", "desc": "Times reorganizados, 2º tempo abrindo — espaços surgindo."}
+    elif minute <= 75:
+        return {"phase": "Crise de fadiga",        "window": "61-75",
+                "goal_rate": 0.30, "corner_rate": 1.00, "card_rate": 0.25,
+                "emoji": "🥵", "desc": "Fadiga reduz organização — erros e chances surgem do nada."}
+    elif minute <= 90:
+        return {"phase": "Zona crítica final",     "window": "76-90",
+                "goal_rate": 0.45, "corner_rate": 1.20, "card_rate": 0.35,
+                "emoji": "🔴", "desc": "MAIOR TAXA DE GOLS DO JOGO. Desespero, riscos táticos, faltas."}
+    else:
+        return {"phase": "Acréscimos",             "window": "90+",
+                "goal_rate": 0.60, "corner_rate": 1.30, "card_rate": 0.50,
+                "emoji": "🚨", "desc": "ALERTA MÁXIMO — acréscimos com pressão extrema e faltas táticas."}
+
+
+def _analyze_score_state(score_h, score_a, minute, h_name, a_name):
+    """
+    Analisa o estado do placar e seus efeitos sobre o comportamento dos times.
+    Retorna padrões esperados e fatores de risco para os próximos minutos.
+    """
+    diff = score_h - score_a
+
+    if diff == 0:
+        if minute < 30:
+            return {"state": "Equilíbrio inicial",
+                    "tension": 0.30,
+                    "behavior": "Times cautelosos, explorando. Gol do mandante tem maior chance.",
+                    "variance": "baixa"}
+        elif minute < 70:
+            return {"state": "Empate tenso",
+                    "tension": 0.55,
+                    "behavior": "Ambos pressionando por vantagem — expectativa de volumes crescentes.",
+                    "variance": "média"}
+        else:
+            return {"state": "Empate crítico",
+                    "tension": 0.85,
+                    "behavior": "ALTA URGÊNCIA dos dois lados. Risco de erros defensivos e gols.",
+                    "variance": "alta"}
+    elif diff == 1:
+        if minute < 60:
+            return {"state": f"{h_name} vencendo por 1",
+                    "tension": 0.50,
+                    "behavior": f"{a_name} tende a aumentar pressão. {h_name} em gestão — risco de contra.",
+                    "variance": "média"}
+        else:
+            return {"state": f"{h_name} vencendo por 1 (final)",
+                    "tension": 0.80,
+                    "behavior": f"{a_name} em desespero: mais chutes, mais faltas táticas, mais escanteios.",
+                    "variance": "muito alta"}
+    elif diff == -1:
+        if minute < 60:
+            return {"state": f"{a_name} vencendo por 1",
+                    "tension": 0.55,
+                    "behavior": f"{h_name} deve aumentar pressão em casa. {a_name} pode tentar ampliar no contra.",
+                    "variance": "média"}
+        else:
+            return {"state": f"{a_name} vencendo por 1 (final)",
+                    "tension": 0.80,
+                    "behavior": f"{h_name} em ataque total — risco de gol ou de ampliar o {a_name} no contra.",
+                    "variance": "muito alta"}
+    elif abs(diff) == 2:
+        if minute < 75:
+            return {"state": f"Vantagem de 2 gols",
+                    "tension": 0.35,
+                    "behavior": "Time à frente no controle. Volume ofensivo baixo do perdedor ainda.",
+                    "variance": "baixa"}
+        else:
+            return {"state": f"Vantagem de 2 gols (risco de reação)",
+                    "tension": 0.60,
+                    "behavior": "Time atrás pode reduzir — gol nos finais ativa pressão máxima.",
+                    "variance": "média-alta"}
+    else:
+        return {"state": f"Placar de {score_h}x{score_a}",
+                "tension": 0.20,
+                "behavior": "Jogo praticamente definido. Poucos riscos defensivos do líder.",
+                "variance": "muito baixa"}
+
+
+def _analyze_momentum_curve(window, h_name, a_name):
+    """
+    Aplica regressão linear sobre o histórico de UPI para cada time.
+    Detecta: aceleração / desaceleração / platô / pico e queda.
+
+    window: lista de snapshots em ordem cronológica (mais antigo → mais novo)
+    """
+    if len(window) < 3:
+        return {"status": "insuficiente", "h_slope": 0.0, "a_slope": 0.0,
+                "h_label": "aguardando dados", "a_label": "aguardando dados",
+                "dominant": None}
+
+    h_upis = [
+        s["h_shots"]*2 + s["h_sot"]*4 + s["h_blocked"]*2 + s["h_corners"]*3
+        for s in window
+    ]
+    a_upis = [
+        s["a_shots"]*2 + s["a_sot"]*4 + s["a_blocked"]*2 + s["a_corners"]*3
+        for s in window
+    ]
+
+    h_slope = _linear_slope(h_upis)
+    a_slope = _linear_slope(a_upis)
+
+    # Detecta pico e queda: UPI atual menor que máximo histórico em ≥20%
+    h_peak  = max(h_upis)
+    a_peak  = max(a_upis)
+    h_curr  = h_upis[-1]
+    a_curr  = a_upis[-1]
+    h_dropped = h_curr < h_peak * 0.80 and h_slope < 0
+    a_dropped = a_curr < a_peak * 0.80 and a_slope < 0
+
+    def _curve_label(slope, dropped, curr, peak):
+        if dropped:
+            return f"PICO E QUEDA (máx={peak}, atual={curr}) — pressão dissipando"
+        if slope > 2.5:
+            return f"ACELERAÇÃO FORTE (+{slope:.1f}/ciclo) — momentum crescendo"
+        if slope > 0.8:
+            return f"Crescendo (+{slope:.1f}/ciclo)"
+        if slope > -0.8:
+            return f"Platô estável ({slope:.1f}/ciclo)"
+        if slope > -2.5:
+            return f"Desacelerando ({slope:.1f}/ciclo)"
+        return f"QUEDA FORTE ({slope:.1f}/ciclo) — momentum se esgotando"
+
+    h_label = _curve_label(h_slope, h_dropped, h_curr, h_peak)
+    a_label = _curve_label(a_slope, a_dropped, a_curr, a_peak)
+
+    dominant = None
+    if h_upis[-1] > a_upis[-1] * 1.3:
+        dominant = h_name
+    elif a_upis[-1] > h_upis[-1] * 1.3:
+        dominant = a_name
+
+    return {
+        "status": "ok",
+        "h_slope": h_slope, "a_slope": a_slope,
+        "h_upis": h_upis, "a_upis": a_upis,
+        "h_label": h_label, "a_label": a_label,
+        "h_dropped": h_dropped, "a_dropped": a_dropped,
+        "dominant": dominant,
+        "h_curr": h_curr, "a_curr": a_curr,
+        "h_peak": h_peak, "a_peak": a_peak,
+    }
+
+
+def _detect_fatigue_signal(window, h_name, a_name):
+    """
+    Detecta fadiga ofensiva: time com pressão sustentada alta (≥3 ciclos)
+    sem gol marcado. Indica ou que o gol é iminente (pressão acumulada)
+    ou que a defesa absorveu e o time vai recuar (risco de contra-ataque).
+    Também detecta o oposto: time que pressionou muito e agora reduziu = fadiga.
+    """
+    if len(window) < 4:
+        return []
+
+    alerts = []
+    for prefix, name in [("h_", h_name), ("a_", a_name)]:
+        upis = [
+            s[f"{prefix}shots"]*2 + s[f"{prefix}sot"]*4 + s[f"{prefix}blocked"]*2
+            for s in window
+        ]
+        # Pressão sustentada: últimos 4 ciclos acima de 15
+        sustained_high = all(u >= 15 for u in upis[-4:])
+        # Queda após pressão: era alto, agora baixou ≥40%
+        was_high = max(upis[:-2]) >= 20 if len(upis) > 2 else False
+        dropped_off = upis[-1] < max(upis[:-1]) * 0.60
+
+        if sustained_high:
+            alerts.append({
+                "team": name,
+                "type": "FADIGA_PRESSAO",
+                "msg": (f"{name}: PRESSÃO SUSTENTADA ALTA por 4+ ciclos sem gol. "
+                        f"Gol iminente OU time vai recuar por esgotamento físico."),
+                "risk": "CONVERSÃO OU RECUO"
+            })
+        elif was_high and dropped_off:
+            alerts.append({
+                "team": name,
+                "type": "RECUO_FADIGA",
+                "msg": (f"{name}: volume caiu após pico — sinais de fadiga ofensiva. "
+                        f"ATENÇÃO: adversário pode explorar espaços em transição."),
+                "risk": "CONTRA-ATAQUE DO ADVERSÁRIO"
+            })
+
+    return alerts
+
+
+def _detect_event_clusters(snap, history, h_name, a_name):
+    """
+    Detecta clusters de eventos que historicamente precedem gols ou cartões.
+
+    Padrões estudados:
+    - 2+ escanteios em 2 ciclos → zona de bola parada, gol de cabeça risco
+    - Falta + amarelo recentes → próxima falta pode ser vermelho
+    - Trave batida → pressão psicológica, gol tende a sair em minutos
+    - Sequência de ataques perigosos crescente → gol em cascata
+    """
+    clusters = []
+    if not history:
+        return clusters
+
+    window = history + [snap]
+
+    for prefix, name in [("h_", h_name), ("a_", a_name)]:
+        # Cluster de escanteios: 2+ novos em 2 ciclos
+        if len(window) >= 3:
+            d1 = _delta(window[-1], window[-2])
+            d2 = _delta(window[-2], window[-3])
+            new_corners = d1[f"d_{prefix}corners"] + d2[f"d_{prefix}corners"]
+            if new_corners >= 2:
+                clusters.append({
+                    "team": name, "type": "CLUSTER_ESCANTEIO",
+                    "msg": f"🚩 {name}: {new_corners} escanteios nos últimos 2 ciclos — zona de bola parada perigosa.",
+                    "urgency": "alta"
+                })
+
+        # Trave batida recente (woodwork)
+        if snap[f"{prefix}woodwork"] > 0:
+            old_ww = history[-1].get(f"{prefix}woodwork", 0) if history else 0
+            if snap[f"{prefix}woodwork"] > old_ww:
+                clusters.append({
+                    "team": name, "type": "TRAVE",
+                    "msg": f"🎯 {name}: BATEU NA TRAVE! Historicamente o gol sai em até 5 min após.",
+                    "urgency": "crítica"
+                })
+
+        # Cluster de faltas → risco de cartão
+        if len(window) >= 2:
+            d1 = _delta(window[-1], window[-2])
+            new_fouls = d1[f"d_{prefix}fouls"]
+            if new_fouls >= 3:
+                clusters.append({
+                    "team": name, "type": "CLUSTER_FALTA",
+                    "msg": f"🟨 {name}: {new_fouls} faltas em 1 ciclo — árbitro provavelmente vai intervir.",
+                    "urgency": "alta"
+                })
+
+        # Ataques perigosos acelerando (3 ciclos crescentes)
+        if len(window) >= 4:
+            da_vals = [s.get(f"{prefix}dangerous", 0) for s in window[-4:]]
+            if da_vals[-1] > da_vals[-2] > da_vals[-3] > da_vals[-4]:
+                clusters.append({
+                    "team": name, "type": "CASCATA_ATAQUE",
+                    "msg": f"⚡ {name}: ataques perigosos crescendo por 4 ciclos seguidos — cascata ofensiva.",
+                    "urgency": "muito alta"
+                })
+
+    return clusters
+
+
+def _predict_next_window(snap, history, momentum, score_state, phase, h_name, a_name):
+    """
+    Combina todos os indicadores para gerar probabilidades do que pode
+    acontecer nos próximos 10 minutos.
+
+    As probabilidades são relativas (não absolutas de gol) — medem a
+    INTENSIDADE DO RISCO no contexto atual do jogo, escalonadas 0-1.
+    """
+    minute = snap["minute"]
+    base_goal = phase["goal_rate"]
+    base_corner = phase["corner_rate"] * 0.15   # ~15% chance de novo escanteio em 10 min
+    base_card = phase["card_rate"]
+
+    # Multiplicadores por momentum
+    h_slope = momentum.get("h_slope", 0)
+    a_slope = momentum.get("a_slope", 0)
+    h_mom_mult = max(0.5, min(2.0, 1.0 + h_slope * 0.15))
+    a_mom_mult = max(0.5, min(2.0, 1.0 + a_slope * 0.15))
+
+    # Multiplicador por tensão do placar
+    tension = score_state.get("tension", 0.5)
+    tension_mult = 0.8 + tension * 0.8
+
+    # xG acumulado como base de qualidade
+    xg_h = snap["h_sot"] / 4.5
+    xg_a = snap["a_sot"] / 4.5
+
+    # Prob de gol: base_rate × momentum × tensão × qualidade de ataque
+    p_goal_h = min(0.95, base_goal * h_mom_mult * tension_mult * (1 + xg_h * 0.1))
+    p_goal_a = min(0.95, base_goal * a_mom_mult * tension_mult * (1 + xg_a * 0.1))
+    p_goal_any = min(0.95, 1 - (1 - p_goal_h) * (1 - p_goal_a))
+
+    # Prob de escanteio nos próximos 5 min
+    h_corner_rate = snap["h_corners"] / max(minute, 1)
+    a_corner_rate = snap["a_corners"] / max(minute, 1)
+    p_corner_h = min(0.95, base_corner + h_corner_rate * 5 * h_mom_mult)
+    p_corner_a = min(0.95, base_corner + a_corner_rate * 5 * a_mom_mult)
+    p_corner_any = min(0.95, 1 - (1 - p_corner_h) * (1 - p_corner_a))
+
+    # Prob de cartão nos próximos 10 min
+    h_foul_rate = snap["h_fouls"] / max(minute, 1)
+    a_foul_rate = snap["a_fouls"] / max(minute, 1)
+    p_card_h = min(0.95, base_card * (1 + h_foul_rate * 3) * (1 + snap["h_yellow"] * 0.3) * tension_mult)
+    p_card_a = min(0.95, base_card * (1 + a_foul_rate * 3) * (1 + snap["a_yellow"] * 0.3) * tension_mult)
+    p_card_any = min(0.95, 1 - (1 - p_card_h) * (1 - p_card_a))
+
+    # Time mais provável de marcar
+    if p_goal_h > p_goal_a * 1.15:
+        likely_scorer = h_name
+    elif p_goal_a > p_goal_h * 1.15:
+        likely_scorer = a_name
+    else:
+        likely_scorer = "Qualquer um"
+
+    # Risco de virada / mudança de dinâmica
+    variance = score_state.get("variance", "média")
+    game_shift_risk = {"muito baixa": 0.05, "baixa": 0.10, "média": 0.25,
+                       "média-alta": 0.40, "alta": 0.60, "muito alta": 0.75}.get(variance, 0.25)
+
+    return {
+        "p_goal_h": round(p_goal_h, 2),
+        "p_goal_a": round(p_goal_a, 2),
+        "p_goal_any": round(p_goal_any, 2),
+        "p_corner_h": round(p_corner_h, 2),
+        "p_corner_a": round(p_corner_a, 2),
+        "p_corner_any": round(p_corner_any, 2),
+        "p_card_h": round(p_card_h, 2),
+        "p_card_a": round(p_card_a, 2),
+        "p_card_any": round(p_card_any, 2),
+        "likely_scorer": likely_scorer,
+        "game_shift_risk": round(game_shift_risk, 2),
+    }
+
+
+def _build_narrative(phase, score_state, momentum, fatigue, clusters, predictions,
+                     h_name, a_name, minute):
+    """
+    Constrói uma narrativa textual automática do estado do jogo,
+    no estilo de um analista de trading com visão de curto prazo.
+    """
+    lines = []
+
+    # Fase e placar
+    lines.append(
+        f"{phase['emoji']} [{minute}'] {phase['phase'].upper()} — {phase['desc']}"
+    )
+    lines.append(
+        f"📊 Estado: {score_state['state']} | Tensão: {int(score_state['tension']*100)}% | "
+        f"Variância: {score_state['variance'].upper()}"
+    )
+    lines.append(f"   → {score_state['behavior']}")
+
+    # Momentum
+    if momentum["status"] == "ok":
+        dom = momentum.get("dominant")
+        if dom:
+            lines.append(f"⚡ Dominância: {dom} controla o ritmo (UPI {momentum['h_curr']} vs {momentum['a_curr']})")
+        lines.append(f"📈 Curva {h_name}: {momentum['h_label']}")
+        lines.append(f"📈 Curva {a_name}: {momentum['a_label']}")
+
+        # Alerta de pico e queda
+        for team, dropped, peak, curr in [
+            (h_name, momentum["h_dropped"], momentum["h_peak"], momentum["h_curr"]),
+            (a_name, momentum["a_dropped"], momentum["a_peak"], momentum["a_curr"]),
+        ]:
+            if dropped:
+                lines.append(
+                    f"⚠️  {team}: pressão caiu após pico ({peak}→{curr}). "
+                    f"Adversário PODE explorar transições agora."
+                )
+
+    # Fadiga
+    for f in fatigue:
+        lines.append(f"🥵 {f['msg']}")
+
+    # Clusters de eventos
+    urgency_icon = {"crítica": "🔴", "muito alta": "🟠", "alta": "🟡", "normal": "⚪"}
+    for c in clusters:
+        icon = urgency_icon.get(c.get("urgency", "normal"), "⚪")
+        lines.append(f"{icon} {c['msg']}")
+
+    # Predições dos próximos 10 min
+    lines.append(f"\n🔮 PRÓXIMOS 10 MINUTOS:")
+    lines.append(
+        f"   Gol qualquer: {predictions['p_goal_any']*100:.0f}%  "
+        f"({h_name}: {predictions['p_goal_h']*100:.0f}% | {a_name}: {predictions['p_goal_a']*100:.0f}%)"
+    )
+    lines.append(
+        f"   Marcador mais provável: {predictions['likely_scorer']}"
+    )
+    lines.append(
+        f"   Escanteio (5 min): {predictions['p_corner_any']*100:.0f}%  "
+        f"({h_name}: {predictions['p_corner_h']*100:.0f}% | {a_name}: {predictions['p_corner_a']*100:.0f}%)"
+    )
+    lines.append(
+        f"   Cartão (10 min): {predictions['p_card_any']*100:.0f}%  "
+        f"({h_name}: {predictions['p_card_h']*100:.0f}% | {a_name}: {predictions['p_card_a']*100:.0f}%)"
+    )
+    lines.append(
+        f"   Risco de mudança de dinâmica: {predictions['game_shift_risk']*100:.0f}%"
+    )
+
+    return lines
+
+
+def _game_consciousness(snap, history, h_name, a_name):
+    """
+    Ponto de entrada da camada de consciência preditiva.
+    Combina todas as análises e retorna o resultado estruturado.
+    """
+    minute = snap["minute"]
+    window = history + [snap]
+
+    phase      = _get_game_phase(minute)
+    score_state= _analyze_score_state(snap["score_h"], snap["score_a"], minute, h_name, a_name)
+    momentum   = _analyze_momentum_curve(window, h_name, a_name)
+    fatigue    = _detect_fatigue_signal(window, h_name, a_name)
+    clusters   = _detect_event_clusters(snap, history, h_name, a_name)
+    predictions= _predict_next_window(snap, history, momentum, score_state, phase, h_name, a_name)
+    narrative  = _build_narrative(phase, score_state, momentum, fatigue, clusters,
+                                   predictions, h_name, a_name, minute)
+
+    return {
+        "phase": phase, "score_state": score_state, "momentum": momentum,
+        "fatigue": fatigue, "clusters": clusters, "predictions": predictions,
+        "narrative": narrative,
+    }
+
+
+def _render_consciousness_panel(consciousness, width=70):
+    """
+    Renderiza o painel de consciência preditiva no dashboard.
+    Exibido após os sinais de trading como seção separada.
+    """
+    print("╠" + "═"*width + "╣")
+    print(f"║  🧠 CONSCIÊNCIA DO JOGO — PROJEÇÃO DOS PRÓXIMOS 10-15 MIN".ljust(width+1) + "║")
+    print("║" + "─"*width + "║")
+    for line in consciousness["narrative"]:
+        # Quebra linhas longas respeitando a largura do painel
+        while len(line) > width - 2:
+            print(f"║  {line[:width-4]}".ljust(width+1) + "║")
+            line = "   " + line[width-4:]
+        print(f"║  {line}".ljust(width+1) + "║")
 
 
 def _print_signal_log(signal_log):
