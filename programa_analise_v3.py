@@ -3642,7 +3642,7 @@ def _render_dashboard(snap, hist, h_name, a_name, home_id,
     # Fase do jogo
     if consciousness:
         ph = consciousness["phase"]
-        print(f"║  {ph['emoji']} {ph['phase'].upper()}  —  {ph['desc'][:45]}".ljust(W+1) + "║")
+        print(f"║  {ph['emoji']} {ph['phase'].upper()}".ljust(W+1) + "║")
 
     print("╠" + "═"*W + "╣")
 
