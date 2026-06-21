@@ -3217,6 +3217,7 @@ import os as _os_module
 POLL_INTERVAL = 30        # segundos entre consultas (respeita rate limit da API)
 HISTORY_SIZE  = 8         # snapshots mantidos em memória (~4 minutos de histórico)
 CLEAR_SCREEN  = True      # False se o terminal não suportar ANSI
+DIAG_MODE     = False     # True para exibir nomes de stat reais retornados pela API
 
 
 def _clear():
@@ -3259,61 +3260,114 @@ def _fetch_live_events(fixture_id):
         return []
 
 
+def _extract_flex(block, *type_names):
+    """
+    Extração robusta de stats: case-insensitive, tenta múltiplos nomes.
+    A API-Football usa capitalizações inconsistentes entre versões e planos.
+    Ex: 'Shots off Goal' vs 'Shots Off Goal', 'Passes accurate' vs 'Passes Accurate'.
+    Retorna 0 se nenhum nome corresponder — nunca lança exceção.
+    """
+    stats_list = block.get("statistics", [])
+    targets = {n.lower().strip() for n in type_names}
+    for stat in stats_list:
+        if stat.get("type", "").lower().strip() in targets:
+            raw = str(stat.get("value") or "0").replace("%", "").strip()
+            try:
+                return int(float(raw))
+            except (ValueError, TypeError):
+                return 0
+    return 0
+
+
+def _debug_stat_names(block):
+    """Retorna todos os nomes de stat disponíveis no bloco (para diagnóstico)."""
+    return [s.get("type", "") for s in block.get("statistics", [])]
+
+
 def _snapshot(fixture_id, home_id):
     """
-    Captura um snapshot completo do momento atual:
-    estatísticas brutas + minuto + eventos novos.
-    Retorna dict padronizado ou None se API falhar.
+    Captura snapshot completo: estatísticas ao vivo + minuto + placar.
+    Usa _extract_flex para tolerar variações de capitalização da API.
+    Registra quais stats vieram como 0 para diagnóstico.
     """
     stats = get_fixture_statistics(fixture_id)
     live  = _fetch_live_fixture(fixture_id)
     if not stats or len(stats) < 2 or not live:
         return None
 
-    # Identifica bloco mandante/visitante pelos IDs
     if int(stats[0]["team"]["id"]) == int(home_id):
         hb, ab = stats[0], stats[1]
     else:
         hb, ab = stats[1], stats[0]
 
-    def _v(block, key):
-        return extract_stat_value(block, key)
+    # _v() tenta múltiplos nomes para cada stat — cobre variações da API
+    def _v(block, *keys):
+        return _extract_flex(block, *keys)
 
-    return {
+    snap = {
         "ts":            _time_module.time(),
         "minute":        live["minute"],
         "status":        live["status"],
         "score_h":       live["score_h"],
         "score_a":       live["score_a"],
-        # Mandante
-        "h_shots":       _v(hb, "Total Shots"),
-        "h_sot":         _v(hb, "Shots on Goal"),
-        "h_blocked":     _v(hb, "Blocked Shots"),
-        "h_woodwork":    _v(hb, "Hit Woodwork"),
-        "h_corners":     _v(hb, "Corner Kicks"),
-        "h_fouls":       _v(hb, "Fouls"),
-        "h_yellow":      _v(hb, "Yellow Cards"),
-        "h_red":         _v(hb, "Red Cards"),
-        "h_dangerous":   _v(hb, "Dangerous Attacks"),
-        "h_attacks":     _v(hb, "Attacks"),
-        "h_off_goal":    _v(hb, "Shots Off Goal"),
-        "h_possession":  _v(hb, "Ball Possession"),
-        "h_passes_acc":  _v(hb, "Passes accurate"),
-        # Visitante
-        "a_shots":       _v(ab, "Total Shots"),
-        "a_sot":         _v(ab, "Shots on Goal"),
-        "a_blocked":     _v(ab, "Blocked Shots"),
-        "a_woodwork":    _v(ab, "Hit Woodwork"),
-        "a_corners":     _v(ab, "Corner Kicks"),
-        "a_fouls":       _v(ab, "Fouls"),
-        "a_yellow":      _v(ab, "Yellow Cards"),
-        "a_red":         _v(ab, "Red Cards"),
-        "a_dangerous":   _v(ab, "Dangerous Attacks"),
-        "a_attacks":     _v(ab, "Attacks"),
-        "a_off_goal":    _v(ab, "Shots Off Goal"),
-        "a_possession":  _v(ab, "Ball Possession"),
-        "a_passes_acc":  _v(ab, "Passes accurate"),
+        # ── Mandante ─────────────────────────────────────────────────
+        "h_shots":    _v(hb, "Total Shots", "Shots Total", "total shots"),
+        "h_sot":      _v(hb, "Shots on Goal", "Shots On Goal", "shots on goal",
+                           "On Goal", "on goal"),
+        "h_blocked":  _v(hb, "Blocked Shots", "Blocked", "blocked shots"),
+        "h_woodwork": _v(hb, "Hit Woodwork", "Woodwork", "hit woodwork"),
+        "h_corners":  _v(hb, "Corner Kicks", "Corners", "corner kicks"),
+        "h_fouls":    _v(hb, "Fouls", "fouls"),
+        "h_yellow":   _v(hb, "Yellow Cards", "Yellow", "yellow cards"),
+        "h_red":      _v(hb, "Red Cards", "Red", "red cards"),
+        "h_dangerous":_v(hb, "Dangerous Attacks", "dangerous attacks",
+                           "Dangerous attacks"),
+        "h_attacks":  _v(hb, "Attacks", "Total Attacks", "attacks"),
+        "h_off_goal": _v(hb, "Shots off Goal", "Shots Off Goal",
+                           "shots off goal", "Off Goal", "off goal"),
+        "h_possession":_v(hb, "Ball Possession", "Possession", "ball possession"),
+        "h_passes_acc":_v(hb, "Passes accurate", "Passes Accurate",
+                            "passes accurate", "Accurate Passes"),
+        # ── Visitante ────────────────────────────────────────────────
+        "a_shots":    _v(ab, "Total Shots", "Shots Total", "total shots"),
+        "a_sot":      _v(ab, "Shots on Goal", "Shots On Goal", "shots on goal",
+                           "On Goal", "on goal"),
+        "a_blocked":  _v(ab, "Blocked Shots", "Blocked", "blocked shots"),
+        "a_woodwork": _v(ab, "Hit Woodwork", "Woodwork", "hit woodwork"),
+        "a_corners":  _v(ab, "Corner Kicks", "Corners", "corner kicks"),
+        "a_fouls":    _v(ab, "Fouls", "fouls"),
+        "a_yellow":   _v(ab, "Yellow Cards", "Yellow", "yellow cards"),
+        "a_red":      _v(ab, "Red Cards", "Red", "red cards"),
+        "a_dangerous":_v(ab, "Dangerous Attacks", "dangerous attacks",
+                           "Dangerous attacks"),
+        "a_attacks":  _v(ab, "Attacks", "Total Attacks", "attacks"),
+        "a_off_goal": _v(ab, "Shots off Goal", "Shots Off Goal",
+                           "shots off goal", "Off Goal", "off goal"),
+        "a_possession":_v(ab, "Ball Possession", "Possession", "ball possession"),
+        "a_passes_acc":_v(ab, "Passes accurate", "Passes Accurate",
+                            "passes accurate", "Accurate Passes"),
+        # Meta: nomes reais da API (para diagnóstico)
+        "_h_stat_names": _debug_stat_names(hb),
+        "_a_stat_names": _debug_stat_names(ab),
     }
+
+    # Fallback: se h_sot==0 mas h_shots>0, estima SOT por taxa histórica (~33%)
+    # Garante que xG nunca seja 0 só por falha de nome de stat
+    if snap["h_sot"] == 0 and snap["h_shots"] > 0:
+        snap["h_sot"] = max(1, round(snap["h_shots"] * 0.33))
+        snap["_h_sot_estimated"] = True
+    if snap["a_sot"] == 0 and snap["a_shots"] > 0:
+        snap["a_sot"] = max(1, round(snap["a_shots"] * 0.33))
+        snap["_a_sot_estimated"] = True
+
+    # Fallback: dangerous attacks via proxy se não disponível no plano
+    if snap["h_dangerous"] == 0 and snap["h_shots"] > 0:
+        snap["h_dangerous"] = round(snap["h_shots"] * 2.2)
+        snap["_da_estimated"] = True
+    if snap["a_dangerous"] == 0 and snap["a_shots"] > 0:
+        snap["a_dangerous"] = round(snap["a_shots"] * 2.2)
+
+    return snap
 
 
 def _delta(new, old):
@@ -3332,44 +3386,88 @@ def _delta(new, old):
 
 # ── SINAIS DE TRADING ─────────────────────────────────────────────────
 
+def _rolling_pressure(snapshots, prefix):
+    """
+    Taxa média de pressão ofensiva calculada a partir dos deltas entre
+    snapshots consecutivos. Retorna (taxa_recente, taxa_anterior, aceleracao).
+
+    Usa a janela completa de snapshots passada — sem threshold mínimo fixo.
+    Com 2 snapshots já calcula 1 delta e retorna aceleração = 0.
+    Com 3+ snapshots compara janelas recente vs anterior.
+    """
+    if len(snapshots) < 2:
+        return 0.0, 0.0, 0.0
+
+    deltas = []
+    for i in range(1, len(snapshots)):
+        d = _delta(snapshots[i], snapshots[i-1])
+        press = (d[f"d_{prefix}sot"] * 4
+                 + d[f"d_{prefix}shots"] * 2
+                 + d[f"d_{prefix}dangerous"] * 1
+                 + d[f"d_{prefix}blocked"] * 1)
+        deltas.append(press)
+
+    # Taxa recente: média dos últimos 2 deltas (ou o único disponível)
+    recent_window  = deltas[-2:] if len(deltas) >= 2 else deltas[-1:]
+    earlier_window = deltas[:-2] if len(deltas) > 2 else []
+
+    recent  = sum(recent_window) / max(len(recent_window), 1)
+    earlier = sum(earlier_window) / max(len(earlier_window), 1) if earlier_window else 0.0
+    accel   = round(recent - earlier, 2)
+    return round(recent, 2), round(earlier, 2), accel
+
+
 def _signal_goal(snap, hist, h_name, a_name):
     """
-    Avalia probabilidade de gol iminente em 5 min.
-    Usa pressão acumulada + aceleração recente (delta dos últimos 2 ciclos).
-    Retorna lista de sinais formatados.
+    Avalia probabilidade de gol iminente.
+
+    Componentes:
+    1. UPI acumulado — pressão total no jogo inteiro
+    2. Taxa de pressao recente — variacao por ciclo de poll (detecta ondas)
+    3. Aceleracao — taxa recente vs janela anterior (onda crescendo ou nao)
+    4. xG acumulado + xG pace projetado ate 90min
+
+    Correcoes vs versao anterior:
+    - _rolling_pressure() calcula deltas desde o 2o ciclo (antes: exigia 3)
+    - xG nunca e 0 graças ao fallback SOT estimado no _snapshot()
+    - Score reequilibrado: UPI 45% + taxa 8pt + aceleracao 12pt + xG 6pt
     """
     signals = []
+    minute = max(snap["minute"], 1)
 
-    # Pressão acumulada (UPI — igual ao módulo existente)
+    # ── 1. UPI acumulado ─────────────────────────────────────────────
     h_upi = (snap["h_shots"]*2 + snap["h_sot"]*4 + snap["h_blocked"]*2
              + snap["h_woodwork"]*5 + snap["h_corners"]*3)
     a_upi = (snap["a_shots"]*2 + snap["a_sot"]*4 + snap["a_blocked"]*2
              + snap["a_woodwork"]*5 + snap["a_corners"]*3)
 
-    # Aceleração: delta dos últimos 2 snapshots (se houver histórico)
-    accel_h = accel_a = 0
-    if len(hist) >= 2:
-        d1 = _delta(snap, hist[-1])
-        accel_h = d1["d_h_sot"]*4 + d1["d_h_shots"]*2 + d1["d_h_dangerous"]*1
-        accel_a = d1["d_a_sot"]*4 + d1["d_a_shots"]*2 + d1["d_a_dangerous"]*1
+    # ── 2 & 3. Taxa e aceleracao via rolling window ───────────────────
+    window = hist + [snap]   # hist = snapshots anteriores; snap = atual
+    h_rate, h_rate_prev, h_accel = _rolling_pressure(window, "h_")
+    a_rate, a_rate_prev, a_accel = _rolling_pressure(window, "a_")
+    trend_h = h_accel > 0
+    trend_a = a_accel > 0
 
-    # Aceleração dupla (últimos 3 snapshots)
-    accel2_h = accel2_a = 0
-    if len(hist) >= 3:
-        d2 = _delta(hist[-1], hist[-2])
-        accel2_h = d2["d_h_sot"]*4 + d2["d_h_shots"]*2
-        accel2_a = d2["d_a_sot"]*4 + d2["d_a_shots"]*2
+    # ── 4. xG acumulado e xG pace ────────────────────────────────────
+    xg_acc_h = round(snap["h_sot"] / 4.5, 2)
+    xg_acc_a = round(snap["a_sot"] / 4.5, 2)
+    # Ritmo atual → projecao de xG adicional nos minutos restantes
+    sot_rate_h = snap["h_sot"] / minute
+    sot_rate_a = snap["a_sot"] / minute
+    xg_proj_h = round(xg_acc_h + sot_rate_h * max(90 - minute, 0) / 4.5, 2)
+    xg_proj_a = round(xg_acc_a + sot_rate_a * max(90 - minute, 0) / 4.5, 2)
 
-    trend_h = (accel_h > 0 and accel_h >= accel2_h)  # pressão crescendo
-    trend_a = (accel_a > 0 and accel_a >= accel2_a)
-
-    # Pressão xG proxy (chutes no alvo / 4.5)
-    xg_h = round(snap["h_sot"] / 4.5, 2)
-    xg_a = round(snap["a_sot"] / 4.5, 2)
-
-    # Score combinado para sinal
-    score_h = h_upi * 0.6 + accel_h * 10 + (5 if trend_h else 0)
-    score_a = a_upi * 0.6 + accel_a * 10 + (5 if trend_a else 0)
+    # ── Score combinado ───────────────────────────────────────────────
+    score_h = (h_upi * 0.45
+               + h_rate * 8
+               + max(h_accel, 0) * 12
+               + xg_acc_h * 6
+               + (8 if trend_h else 0))
+    score_a = (a_upi * 0.45
+               + a_rate * 8
+               + max(a_accel, 0) * 12
+               + xg_acc_a * 6
+               + (8 if trend_a else 0))
 
     def _stars(s):
         if s >= 80: return "★★★★★ ELITE"
@@ -3378,18 +3476,28 @@ def _signal_goal(snap, hist, h_name, a_name):
         if s >= 18: return "★★☆☆☆ FRACO"
         return None
 
-    for team, score, upi, accel, trend, xg in [
-        (h_name, score_h, h_upi, accel_h, trend_h, xg_h),
-        (a_name, score_a, a_upi, accel_a, trend_a, xg_a),
+    for team, score, upi, rate, accel, trend, xg_acc, xg_proj, sot in [
+        (h_name, score_h, h_upi, h_rate, h_accel, trend_h,
+         xg_acc_h, xg_proj_h, snap["h_sot"]),
+        (a_name, score_a, a_upi, a_rate, a_accel, trend_a,
+         xg_acc_a, xg_proj_a, snap["a_sot"]),
     ]:
         label = _stars(score)
         if label:
-            arrow = "↑↑" if trend else "→"
+            arrow = "↑↑" if (trend and accel > 1) else ("↑" if trend else "→")
+            est = "~" if (
+                snap.get("_h_sot_estimated") and team == h_name or
+                snap.get("_a_sot_estimated") and team == a_name
+            ) else ""
             signals.append({
                 "type": "GOL",
                 "team": team,
                 "strength": label,
-                "detail": f"UPI={upi} | Aceleração={accel} {arrow} | xG~{xg}",
+                "detail": (
+                    f"UPI={upi} | SOT={est}{sot} | "
+                    f"xG={xg_acc:.2f} (proj/90={xg_proj:.2f}) | "
+                    f"Taxa={rate:.1f}/ciclo {arrow} | Daccel={accel:+.1f}"
+                ),
                 "score": score,
             })
 
@@ -3412,10 +3520,11 @@ def _signal_corner(snap, hist, h_name, a_name):
         # Número de chutes "candidatos a escanteio" ainda não convertidos
         candidate_ratio = (blocked + off_goal) / max(corners + 1, 1)
 
-        # Delta recente de chutes bloqueados (momento atual)
+        # Delta recente de chutes bloqueados — usa window completa desde o 1o ciclo
+        window = hist + [snap]
         d_blocked = 0
-        if len(hist) >= 1:
-            d = _delta(snap, hist[-1])
+        if len(window) >= 2:
+            d = _delta(window[-1], window[-2])
             d_blocked = d[f"d_{prefix}blocked"] + d[f"d_{prefix}off_goal"]
 
         ivl = blocked * 2.5 + off_goal * 1.2 + corners * 0.8 + d_blocked * 4
@@ -3464,10 +3573,11 @@ def _signal_card(snap, hist, h_name, a_name, minute):
         # Taxa de faltas acumuladas
         foul_rate = fouls / max(minute, 1) * 90  # projeção para 90 min
 
-        # Delta de faltas recentes
+        # Delta de faltas recentes — disponível desde o 2o ciclo
+        window = hist + [snap]
         d_fouls = 0
-        if len(hist) >= 1:
-            d = _delta(snap, hist[-1])
+        if len(window) >= 2:
+            d = _delta(window[-1], window[-2])
             d_fouls = d[f"d_{prefix}fouls"]
 
         # Score de risco de cartão
@@ -3626,8 +3736,20 @@ def _render_dashboard(snap, hist, h_name, a_name, home_id,
         print(f"║  {h_name[:18]:<18}: [{h_trend}] →{h_upi}".ljust(69) + "║")
         print(f"║  {a_name[:18]:<18}: [{a_trend}] →{a_upi}".ljust(69) + "║")
 
+    # ── DIAGNÓSTICO DE STATS (ativado via DIAG_MODE = True) ──────────
+    if DIAG_MODE:
+        print("╠" + "═"*68 + "╣")
+        print(f"║  [DIAG] Stats disponíveis na API para {h_name[:15]}:".ljust(69) + "║")
+        for n in snap.get("_h_stat_names", []):
+            print(f"║    • {n}".ljust(69) + "║")
+        # Indica quais fallbacks foram usados
+        if snap.get("_h_sot_estimated"):
+            print(f"║  ⚠ SOT mandante: estimado por proxy (33% de Total Shots)".ljust(69) + "║")
+        if snap.get("_da_estimated"):
+            print(f"║  ⚠ Dangerous Attacks: estimado por proxy (2.2x shots)".ljust(69) + "║")
+
     print("╠" + "═"*68 + "╣")
-    print(f"║  [Q] Sair do dashboard   Intervalo de polling: {POLL_INTERVAL}s".ljust(69) + "║")
+    print(f"║  [Q] Sair   Intervalo: {POLL_INTERVAL}s   [DIAG_MODE={DIAG_MODE}]".ljust(69) + "║")
     print("╚" + "═"*68 + "╝")
 
 
