@@ -799,17 +799,192 @@ def calculate_weighted_xg(xg_history, weights=None):
     return round(w_xg / w_total, 3), round(w_xga / w_total, 3)
 
 
-def calculate_xg_lambdas(wxg_home, wxga_away, wxg_away, wxga_home):
+def calculate_xg_lambdas(wxg_home, wxga_away, wxg_away, wxga_home,
+                          avg_gf_home=None, avg_gf_away=None):
     """
-    Nova fórmula de lambda usando xG ponderado.
-    lambda_home = 0.55 * weighted_xg_home + 0.45 * weighted_xga_away
-    lambda_away = 0.55 * weighted_xg_away + 0.45 * weighted_xga_home
+    Lambda calibrado: blend de xG ponderado + GF histórico.
+    Formula base: 0.55 * xG_proprio + 0.45 * xGA_adversario
+    Blend com GF histórico (40%) para ancorar o lambda na realidade de gols.
+    Floor dinâmico: lambda nunca cai abaixo de max(avg_gf * 0.55, xG * 0.85).
     """
     if None in (wxg_home, wxga_away, wxg_away, wxga_home):
         return None, None
-    lh = max(0.3, 0.55 * wxg_home + 0.45 * wxga_away)
-    la = max(0.3, 0.55 * wxg_away + 0.45 * wxga_home)
+
+    # Base xG formula
+    lh_xg = 0.55 * wxg_home + 0.45 * wxga_away
+    la_xg = 0.55 * wxg_away + 0.45 * wxga_home
+
+    # Blend com GF histórico para evitar compressão excessiva
+    if avg_gf_home is not None and avg_gf_home > 0:
+        lh = lh_xg * 0.60 + avg_gf_home * 0.40
+    else:
+        lh = lh_xg
+
+    if avg_gf_away is not None and avg_gf_away > 0:
+        la = la_xg * 0.60 + avg_gf_away * 0.40
+    else:
+        la = la_xg
+
+    # Sanity floor: nunca cair abaixo de max(gf*0.55, xG*0.85)
+    floor_h = max(
+        (avg_gf_home or 0) * 0.55,
+        wxg_home * 0.85,
+        0.30,
+    )
+    floor_a = max(
+        (avg_gf_away or 0) * 0.55,
+        wxg_away * 0.85,
+        0.30,
+    )
+    lh = max(lh, floor_h)
+    la = max(la, floor_a)
+
     return round(lh, 3), round(la, 3)
+
+
+def calculate_lambda_trace(wxg_home, wxga_away, wxg_away, wxga_home,
+                            avg_gf_home, avg_gf_away,
+                            climate_impact=None, fatigue_h=None, fatigue_a=None,
+                            field_tilt=None, ppda_h=None, ppda_a=None,
+                            h_name="Casa", a_name="Fora"):
+    """
+    Lambda Trace Engine — rastreamento completo passo a passo do lambda final.
+    Retorna dict com todos os componentes e o lambda ajustado de cada time.
+    """
+    def _safe(v, d=0.0):
+        try: return float(v) if v is not None else d
+        except: return d
+    def _fi(fat):
+        if fat is None: return 0.0
+        if isinstance(fat, (int, float)): return float(fat)
+        return float((fat or {}).get("fatigue_index") or 0)
+
+    # ── Componentes base ─────────────────────────────────────────────
+    h_wxg   = _safe(wxg_home, avg_gf_home * 0.7 if avg_gf_home else 1.2)
+    a_wxg   = _safe(wxg_away, avg_gf_away * 0.7 if avg_gf_away else 0.9)
+    h_xga   = _safe(wxga_away, 1.1)
+    a_xga   = _safe(wxga_home, 1.0)
+    h_gf    = _safe(avg_gf_home, h_wxg)
+    a_gf    = _safe(avg_gf_away, a_wxg)
+
+    # Blend inicial: 60% xG + 40% GF histórico
+    h_blend = h_wxg * 0.60 + h_gf * 0.40
+    a_blend = a_wxg * 0.60 + a_gf * 0.40
+
+    # Ajuste pela defesa adversária (xGA): delta em relação à média (1.1)
+    h_def_adj = (h_xga - 1.1) * 0.25   # defesa fraca do oponente → boost
+    a_def_adj = (a_xga - 1.0) * 0.25
+
+    h_lambda = h_blend + h_def_adj
+    a_lambda = a_blend + a_def_adj
+
+    # ── Field Tilt ────────────────────────────────────────────────────
+    h_ft_adj = 0.0
+    if field_tilt:
+        ft_h = _safe(field_tilt.get("home_tilt"), 50)
+        ft_diff = ft_h - 50.0
+        h_ft_adj = ft_diff * 0.008    # ±0.008 por ponto de field tilt
+        a_ft_adj = -ft_diff * 0.008
+    else:
+        a_ft_adj = 0.0
+    h_lambda += h_ft_adj
+    a_lambda += a_ft_adj
+
+    # ── PPDA (pressing quality) ───────────────────────────────────────
+    h_ppda_adj = 0.0
+    a_ppda_adj = 0.0
+    if ppda_h and ppda_a:
+        ph_v = _safe(ppda_h.get("ppda"), 10)
+        pa_v = _safe(ppda_a.get("ppda"), 10)
+        # PPDA menor = pressing melhor → boost ofensivo (obriga erros adversário)
+        h_ppda_adj = (pa_v - ph_v) * 0.01
+        a_ppda_adj = (ph_v - pa_v) * 0.01
+    h_lambda += h_ppda_adj
+    a_lambda += a_ppda_adj
+
+    # ── Clima ─────────────────────────────────────────────────────────
+    cli_coeff = 1.0
+    cli_note  = "sem dados"
+    if climate_impact:
+        cli_coeff = _safe(climate_impact.get("xg_coeff"), 1.0)
+        # Limitador: clima nunca reduz mais que 15%
+        cli_coeff = max(0.85, cli_coeff)
+        cli_note  = climate_impact.get("summary", "neutro")
+    h_cli_adj = h_lambda * (cli_coeff - 1.0)
+    a_cli_adj = a_lambda * (cli_coeff - 1.0)
+    h_lambda *= cli_coeff
+    a_lambda *= cli_coeff
+
+    # ── Fadiga ────────────────────────────────────────────────────────
+    h_fi_val    = _fi(fatigue_h)
+    a_fi_val    = _fi(fatigue_a)
+    # Limitador: fadiga nunca reduz mais que 10%
+    h_fat_coeff = max(0.90, 1.0 - h_fi_val * 0.001)
+    a_fat_coeff = max(0.90, 1.0 - a_fi_val * 0.001)
+    h_fat_adj   = h_lambda * (h_fat_coeff - 1.0)
+    a_fat_adj   = a_lambda * (a_fat_coeff - 1.0)
+    h_lambda *= h_fat_coeff
+    a_lambda *= a_fat_coeff
+
+    # ── Sanity floor ──────────────────────────────────────────────────
+    floor_h = max(h_gf * 0.55, h_wxg * 0.85, 0.30)
+    floor_a = max(a_gf * 0.55, a_wxg * 0.85, 0.30)
+    h_lambda_raw  = h_lambda
+    a_lambda_raw  = a_lambda
+    h_lambda = max(h_lambda, floor_h)
+    a_lambda = max(a_lambda, floor_a)
+
+    # ── Sanity check: diferença > 40% do GF histórico ─────────────────
+    def _compression_pct(lam, gf):
+        if gf <= 0: return 0.0
+        return (gf - lam) / gf * 100.0
+
+    h_compress = _compression_pct(h_lambda, h_gf)
+    a_compress = _compression_pct(a_lambda, a_gf)
+
+    h_warning = h_compress > 40.0
+    a_warning = a_compress > 40.0
+
+    return {
+        "home": {
+            "name":          h_name,
+            "base_gf":       round(h_gf, 3),
+            "base_xg":       round(h_wxg, 3),
+            "blend_inicial": round(h_blend, 3),
+            "def_adj":       round(h_def_adj, 3),
+            "field_tilt_adj":round(h_ft_adj, 3),
+            "ppda_adj":      round(h_ppda_adj, 3),
+            "clima_adj":     round(h_cli_adj, 3),
+            "fadiga_adj":    round(h_fat_adj, 3),
+            "lambda_pre_floor": round(h_lambda_raw, 3),
+            "floor":         round(floor_h, 3),
+            "lambda_final":  round(h_lambda, 3),
+            "compression_pct": round(h_compress, 1),
+            "warning":       h_warning,
+        },
+        "away": {
+            "name":          a_name,
+            "base_gf":       round(a_gf, 3),
+            "base_xg":       round(a_wxg, 3),
+            "blend_inicial": round(a_blend, 3),
+            "def_adj":       round(a_def_adj, 3),
+            "field_tilt_adj":round(a_ft_adj, 3),
+            "ppda_adj":      round(a_ppda_adj, 3),
+            "clima_adj":     round(a_cli_adj, 3),
+            "fadiga_adj":    round(a_fat_adj, 3),
+            "lambda_pre_floor": round(a_lambda_raw, 3),
+            "floor":         round(floor_a, 3),
+            "lambda_final":  round(a_lambda, 3),
+            "compression_pct": round(a_compress, 1),
+            "warning":       a_warning,
+        },
+        "clima_coeff":  round(cli_coeff, 3),
+        "clima_nota":   cli_note,
+        "h_fat_coeff":  round(h_fat_coeff, 3),
+        "a_fat_coeff":  round(a_fat_coeff, 3),
+        "h_lambda_final": round(h_lambda, 3),
+        "a_lambda_final": round(a_lambda, 3),
+    }
 
 
 # =====================================================================
@@ -1345,13 +1520,11 @@ def run_monte_carlo(lambda_home, lambda_away, n_simulations=100000,
     import random as _rand
     import math as _math
 
-    # Blend lambda: 60% Poisson base, 40% xG se disponível
-    if xg_lambda_home is not None and xg_lambda_away is not None:
-        lh = lambda_home * 0.60 + xg_lambda_home * 0.40
-        la = lambda_away * 0.60 + xg_lambda_away * 0.40
-    else:
-        lh = lambda_home
-        la = lambda_away
+    # lambda_home já é o lambda calibrado (inclui xG blend feito no orchestrator).
+    # xg_lambda_home é o mesmo valor — NÃO fazer double-blend.
+    # Se por algum motivo lambda_home e xg_lambda_home forem diferentes, usa lambda_home.
+    lh = lambda_home
+    la = lambda_away
 
     # Ajuste por ELO: modifica lambda proporcionalmente à diferença de ELO
     if elo_weight != 0.0:
@@ -1558,46 +1731,89 @@ def calculate_confidence_score(h_count, a_count, poisson_probs, mc_probs,
 # MÓDULO 12 - ENSEMBLE (CONSENSO ENTRE MODELOS)
 # =====================================================================
 
+def _validate_model_probs(name, probs):
+    """
+    Model Integrity Check: verifica que o dict de probabilidades é válido.
+    Retorna (probs_validados, status_msg).
+    Critérios: soma 1.0 ± 3%, nenhum valor None/NaN/0 nos 3 outcomes.
+    """
+    import math as _m
+    if probs is None:
+        return None, f"{name}: INVÁLIDO (None)"
+    outcomes = ["home_win", "draw", "away_win"]
+    vals = []
+    for o in outcomes:
+        v = probs.get(o)
+        if v is None:
+            return None, f"{name}: INVÁLIDO ('{o}' ausente)"
+        try:
+            vf = float(v)
+        except Exception:
+            return None, f"{name}: INVÁLIDO ('{o}' não numérico)"
+        if _m.isnan(vf) or _m.isinf(vf):
+            return None, f"{name}: INVÁLIDO ('{o}' NaN/Inf)"
+        if vf <= 0.0:
+            return None, f"{name}: INVÁLIDO ('{o}'=0 ou negativo)"
+        vals.append(vf)
+    total = sum(vals)
+    if abs(total - 1.0) > 0.03:
+        # Tentar normalizar
+        if total > 0:
+            probs = {**probs, **{o: round(probs[o] / total, 4) for o in outcomes}}
+        else:
+            return None, f"{name}: INVÁLIDO (soma={total:.3f})"
+    return probs, f"{name}: OK (soma={total:.3f})"
+
+
 def calculate_ensemble_probability(poisson_probs, mc_probs, ml_probs,
-                                    xg_probs, elo_probs):
+                                    xg_probs, elo_probs, api_probs=None):
     """
-    Ensemble ponderado:
-    Poisson = 20%, Monte Carlo = 35%, ML = 25%, xG Model = 10%, ELO = 10%
-    Se ML não disponível, redistribui seu peso proporcionalmente.
+    Ensemble ponderado com Model Integrity Check.
+    Pesos: MC=30%, Poisson=25%, ML=20%, API=15%, ELO=10%
+    Modelos inválidos são excluídos automaticamente e pesos redistribuídos.
     """
-    weights = {
-        "poisson": 0.20,
-        "monte_carlo": 0.35,
-        "ml": 0.25,
-        "xg": 0.10,
-        "elo": 0.10
+    BASE_WEIGHTS = {
+        "monte_carlo": 0.30,
+        "poisson":     0.25,
+        "ml":          0.20,
+        "api":         0.15,
+        "elo":         0.10,
     }
 
-    sources = {
-        "poisson": poisson_probs,
+    raw_sources = {
         "monte_carlo": mc_probs,
-        "ml": ml_probs,
-        "xg": xg_probs,
-        "elo": elo_probs
+        "poisson":     poisson_probs,
+        "ml":          ml_probs,
+        "api":         api_probs,
+        "elo":         elo_probs,
     }
 
-    # Remove fontes indisponíveis e redistribui pesos
-    available = {k: v for k, v in sources.items() if v is not None}
+    # Validar cada modelo
+    available  = {}
+    audit_log  = []
+    for name, probs in raw_sources.items():
+        validated, msg = _validate_model_probs(name, probs)
+        audit_log.append(msg)
+        if validated is not None:
+            available[name] = validated
+
     if not available:
         return None
 
-    total_weight = sum(weights[k] for k in available)
-    norm_weights = {k: weights[k] / total_weight for k in available}
+    # Redistribuir pesos proporcional ao peso base
+    total_weight = sum(BASE_WEIGHTS[k] for k in available)
+    norm_weights = {k: BASE_WEIGHTS[k] / total_weight for k in available}
 
     outcomes = ["home_win", "draw", "away_win"]
     ensemble = {}
     for outcome in outcomes:
         val = 0.0
         for src, probs in available.items():
-            val += probs.get(outcome, 0.333) * norm_weights[src]
+            # Sem fallback silencioso — só usa probs já validados com a chave presente
+            val += probs[outcome] * norm_weights[src]
         ensemble[outcome] = round(val, 4)
 
-    # Normaliza para somar 1.0
+    # Normaliza final para garantir soma exata = 1.0
     total = sum(ensemble[o] for o in outcomes)
     if total > 0:
         for o in outcomes:
@@ -1619,7 +1835,10 @@ def calculate_ensemble_probability(poisson_probs, mc_probs, ml_probs,
             sum(norm_weights[src] for src, _ in over25_sources), 4
         )
 
-    ensemble["sources_used"] = list(available.keys())
+    ensemble["sources_used"]  = list(available.keys())
+    ensemble["excluded"]      = [n for n in raw_sources if n not in available]
+    ensemble["audit_log"]     = audit_log
+    ensemble["norm_weights"]  = {k: round(v, 3) for k, v in norm_weights.items()}
     ensemble["weights_used"] = {k: round(norm_weights[k], 3) for k in available}
     return ensemble
 
@@ -3426,69 +3645,185 @@ def calculate_tactical_profile(hist, blended, team_id, lineups_data=None):
     }
 
 
-def calculate_tactical_matchup(h_profile, a_profile, h_name, a_name):
-    """Compara perfis táticos com análise setorial detalhada."""
+def calculate_tactical_matchup(h_profile, a_profile, h_name, a_name,
+                               ppda_h=None, ppda_a=None,
+                               field_tilt=None, xthreat=None,
+                               zones_h=None, zones_a=None,
+                               lineups=None):
+    """
+    Tactical Edge Score V2 — usa PPDA, Field Tilt, xThreat, zonas de pressão,
+    progressões, formação e escalações além dos perfis táticos históricos.
+    Escala 0-100: 0-20 grande vantagem visitante, 80-100 grande vantagem mandante.
+    """
     if not h_profile or not a_profile:
-        return {"score": 50, "advantages": [], "vulnerabilities": [], "summary": "Dados insuficientes"}
+        return {"score": 50, "advantages": [], "vulnerabilities": [], "summary": "Dados insuficientes",
+                "edge_breakdown": {}, "narrative": []}
 
-    advantages     = []
+    def _safe(v, d=0.0):
+        try: return float(v) if v is not None else d
+        except: return d
+
+    advantages      = []
     vulnerabilities = []
+    narrative       = []
+    edge_breakdown  = {}
     score = 50.0
 
-    h_press = h_profile.get("press_score", 50)
-    a_press = a_profile.get("press_score", 50)
-    h_poss  = h_profile.get("possession", 50)
-    a_poss  = a_profile.get("possession", 50)
+    h_press = _safe(h_profile.get("press_score"), 50)
+    a_press = _safe(a_profile.get("press_score"), 50)
+    h_poss  = _safe(h_profile.get("possession"), 50)
+    a_poss  = _safe(a_profile.get("possession"), 50)
 
-    # Posse alta vs pressing
-    if h_poss >= 55 and a_profile.get("pressure") == "Alta Pressão":
-        vulnerabilities.append(f"{h_name[:14]}: posse alta vulnerável ao pressing do visitante")
-        score -= 5
-    if a_poss >= 55 and h_profile.get("pressure") == "Alta Pressão":
-        vulnerabilities.append(f"{a_name[:14]}: pode perder a bola sob pressão do mandante")
-        score += 5
+    # ── Field Tilt (peso 12 pts) ──────────────────────────────────────
+    ft_delta = 0.0
+    if field_tilt:
+        ft_h = _safe(field_tilt.get("home_tilt"), 50)
+        ft_delta = (ft_h - 50.0) * 0.24   # 0.24 pt por % de field tilt
+        score += ft_delta
+        edge_breakdown["FieldTilt"] = round(ft_delta, 1)
+        if ft_h >= 60:
+            advantages.append(f"{h_name[:14]}: domínio territorial — Field Tilt {ft_h:.0f}% vs {100-ft_h:.0f}%")
+            narrative.append(f"{h_name[:14]} deve controlar a posse e o terço final adversário.")
+        elif ft_h <= 40:
+            advantages.append(f"{a_name[:14]}: domínio territorial — Field Tilt {100-ft_h:.0f}% vs {ft_h:.0f}%")
+            narrative.append(f"{a_name[:14]} tende a pressionar o bloco defensivo adversário.")
+        else:
+            narrative.append(f"Field Tilt equilibrado — disputa territorial em aberto.")
 
-    # Linha defensiva vs transição
+    # ── xThreat (peso 10 pts) ─────────────────────────────────────────
+    xt_delta = 0.0
+    if xthreat:
+        xt_h = _safe(xthreat.get("home_xthreat"), 50)
+        xt_a = _safe(xthreat.get("away_xthreat"), 50)
+        if xt_h + xt_a > 0:
+            xt_share = (xt_h / (xt_h + xt_a)) * 100
+            xt_delta = (xt_share - 50.0) * 0.20
+            score += xt_delta
+            edge_breakdown["xThreat"] = round(xt_delta, 1)
+            if xt_share >= 58:
+                advantages.append(f"{h_name[:14]}: cria mais ameaças reais (xT {xt_h:.1f} vs {xt_a:.1f})")
+                narrative.append(f"{h_name[:14]} cria superioridade entre linhas e nas zonas de finalização.")
+            elif xt_share <= 42:
+                advantages.append(f"{a_name[:14]}: ameaça real maior (xT {xt_a:.1f} vs {xt_h:.1f})")
+                narrative.append(f"{a_name[:14]} cria as melhores oportunidades — perigo real em contra-ataques.")
+
+    # ── PPDA — Qualidade do Pressing (peso 8 pts) ─────────────────────
+    ppda_delta = 0.0
+    if ppda_h and ppda_a:
+        ph_v = _safe(ppda_h.get("ppda"), 10)
+        pa_v = _safe(ppda_a.get("ppda"), 10)
+        if ph_v > 0 and pa_v > 0:
+            # PPDA menor = pressing melhor; diferença normalizada por 5
+            ppda_delta = (pa_v - ph_v) / 5.0 * 8.0
+            ppda_delta = max(-8, min(8, ppda_delta))
+            score += ppda_delta
+            edge_breakdown["PPDA"] = round(ppda_delta, 1)
+            if ph_v < pa_v - 2:
+                advantages.append(f"{h_name[:14]}: pressing superior (PPDA {ph_v:.1f} vs {pa_v:.1f})")
+                narrative.append(f"{h_name[:14]} recupera a bola mais rápido no campo adversário.")
+            elif pa_v < ph_v - 2:
+                advantages.append(f"{a_name[:14]}: pressing superior (PPDA {pa_v:.1f} vs {ph_v:.1f})")
+                narrative.append(f"{a_name[:14]} força erros do adversário com pressão intensa.")
+
+    # ── Posse de Bola (peso 6 pts) ────────────────────────────────────
+    poss_delta = (h_poss - a_poss) / 10.0 * 3.0
+    poss_delta = max(-6, min(6, poss_delta))
+    score += poss_delta
+    edge_breakdown["Posse"] = round(poss_delta, 1)
+    if h_poss >= 56:
+        narrative.append(f"{h_name[:14]} deve controlar o ritmo com posse de {h_poss:.0f}%.")
+    elif a_poss >= 56:
+        narrative.append(f"{a_name[:14]} deve ditar o jogo com posse de {a_poss:.0f}%.")
+
+    # ── Pressão por zonas (peso 6 pts) ────────────────────────────────
+    zones_delta = 0.0
+    if zones_h and zones_a:
+        h_hp = _safe(zones_h.get("high_pct"), 33)
+        a_hp = _safe(zones_a.get("high_pct"), 33)
+        zones_delta = (h_hp - a_hp) * 0.10
+        zones_delta = max(-6, min(6, zones_delta))
+        score += zones_delta
+        edge_breakdown["Zonas"] = round(zones_delta, 1)
+        if h_hp > a_hp + 10:
+            advantages.append(f"{h_name[:14]}: pressiona mais no campo adversário ({h_hp:.0f}% alta pressão)")
+            narrative.append(f"{h_name[:14]} ataca com blocos adiantados — força erros no campo adversário.")
+        elif a_hp > h_hp + 10:
+            advantages.append(f"{a_name[:14]}: pressiona em alta intensidade ({a_hp:.0f}% alta pressão)")
+
+    # ── Press Score histórico (peso 5 pts) ────────────────────────────
+    press_delta = (h_press - a_press) / 20.0 * 5.0
+    press_delta = max(-5, min(5, press_delta))
+    score += press_delta
+    edge_breakdown["Pressing"] = round(press_delta, 1)
+
+    # ── Linha defensiva vs Transição (peso 8 pts) ─────────────────────
+    trans_delta = 0.0
     if h_profile.get("transition") == "Transição Direta" and a_profile.get("defensive_line") == "Linha Alta / Vulnerável":
-        advantages.append(f"{h_name[:14]}: transição direta explora linha alta visitante — VANTAGEM")
-        score += 8
-    if a_profile.get("transition") == "Transição Direta" and h_profile.get("defensive_line") == "Linha Alta / Vulnerável":
-        advantages.append(f"{a_name[:14]}: transição rápida vs linha alta mandante — VANTAGEM")
-        score -= 8
-
-    # Superioridade de pressão
-    if h_press > a_press + 15:
-        advantages.append(f"{h_name[:14]}: superioridade de pressão ({h_press:.0f} vs {a_press:.0f}) — controla espaços")
-        score += 6
-    elif a_press > h_press + 15:
-        advantages.append(f"{a_name[:14]}: superioridade de pressão ({a_press:.0f} vs {h_press:.0f})")
-        score -= 6
-
-    # Estilo ofensivo vs defesa
-    if h_profile.get("attack_zone") == "Ataque Aéreo+Chutes" and a_profile.get("defensive_line") == "Defesa Sólida":
-        vulnerabilities.append(f"{h_name[:14]}: bolas aéreas podem ser neutralizadas pela defesa sólida visitante")
+        advantages.append(f"{h_name[:14]}: transição rápida explora linha alta visitante")
+        narrative.append(f"Transições do {h_name[:14]} são a maior ameaça — linha alta do visitante cria espaço.")
+        trans_delta += 8
     if a_profile.get("construction") in ["Contra-Ataque", "Transição Direta"]:
         if h_profile.get("defensive_line") == "Linha Alta / Vulnerável":
-            vulnerabilities.append(f"{h_name[:14]}: linha alta vulnerável ao contra-ataque visitante")
-            score -= 7
+            vulnerabilities.append(f"{h_name[:14]}: linha alta vulnerável ao contra-ataque do {a_name[:14]}")
+            narrative.append(f"A principal ameaça do {a_name[:14]} são transições rápidas após recuperação.")
+            trans_delta -= 8
+    score += trans_delta
+    if trans_delta != 0:
+        edge_breakdown["Transição"] = round(trans_delta, 1)
 
-    # Equilíbrio de posse
-    if abs(h_poss - a_poss) <= 4:
-        vulnerabilities.append("Equilíbrio de posse — jogo pode ser disputado em transições")
+    # ── Escalação / Formação (peso 4 pts) ────────────────────────────
+    form_delta = 0.0
+    if lineups:
+        h_form = next((tl.get("formation") for tl in lineups
+                       if tl.get("team", {}).get("name", "")[:6].lower() in h_name[:6].lower()), None)
+        a_form = next((tl.get("formation") for tl in lineups
+                       if tl.get("team", {}).get("name", "")[:6].lower() in a_name[:6].lower()), None)
+        if h_form and a_form:
+            # Formações ofensivas favorecem mandante (campo familiar)
+            off_forms = {"4-3-3", "4-2-3-1", "3-4-3", "4-1-4-1"}
+            def_forms = {"5-4-1", "4-5-1", "5-3-2"}
+            if h_form in off_forms and a_form in def_forms:
+                form_delta = 4.0
+                narrative.append(f"{h_name[:14]} ({h_form}) deve ter mais posse contra o bloco defensivo ({a_form}) do {a_name[:14]}.")
+            elif a_form in off_forms and h_form in def_forms:
+                form_delta = -4.0
+                narrative.append(f"{a_name[:14]} ({a_form}) busca impor jogo ofensivo contra o bloco do {h_name[:14]} ({h_form}).")
+            else:
+                narrative.append(f"Formações espelhadas: {h_name[:10]} {h_form} vs {a_name[:10]} {a_form}.")
+    score += form_delta
+    if form_delta != 0:
+        edge_breakdown["Formação"] = round(form_delta, 1)
 
-    score = max(0, min(100, score))
+    score = max(0.0, min(100.0, score))
 
-    if score >= 62:   summary = f"Vantagem tática clara para {h_name[:14]}"
-    elif score >= 55: summary = f"Leve vantagem tática para {h_name[:14]}"
-    elif score <= 38: summary = f"Vantagem tática clara para {a_name[:14]}"
-    elif score <= 45: summary = f"Leve vantagem tática para {a_name[:14]}"
-    else:             summary = "Equilíbrio tático — resultado em aberto"
+    # Classificação e summary
+    if score >= 80:
+        summary = f"Grande vantagem tática para {h_name[:14]}"
+        narrative.insert(0, f"{h_name[:14]} tem vantagem tática clara em múltiplas dimensões.")
+    elif score >= 60:
+        summary = f"Vantagem tática para {h_name[:14]}"
+    elif score >= 55:
+        summary = f"Leve vantagem tática para {h_name[:14]}"
+    elif score <= 20:
+        summary = f"Grande vantagem tática para {a_name[:14]}"
+        narrative.insert(0, f"{a_name[:14]} domina taticamente em múltiplas dimensões.")
+    elif score <= 40:
+        summary = f"Vantagem tática para {a_name[:14]}"
+    elif score <= 45:
+        summary = f"Leve vantagem tática para {a_name[:14]}"
+    else:
+        summary = "Equilíbrio tático — fatores contextuais decidem"
+        narrative.append("Nenhum time apresenta vantagem tática dominante. Contexto e forma física serão decisivos.")
 
     return {
-        "score": score, "advantages": advantages,
-        "vulnerabilities": vulnerabilities, "summary": summary,
-        "h_style": h_profile.get("style", "?"),
-        "a_style": a_profile.get("style", "?"),
+        "score": round(score, 1),
+        "advantages":    advantages,
+        "vulnerabilities": vulnerabilities,
+        "summary":       summary,
+        "h_style":       h_profile.get("style", "?"),
+        "a_style":       a_profile.get("style", "?"),
+        "edge_breakdown": edge_breakdown,
+        "narrative":     narrative,
     }
 
 
@@ -4277,23 +4612,69 @@ def calculate_player_impact(h_players, a_players, lineups, h_name, a_name):
 
         # Verificar ausências nas escalações
         if lineups:
-            starters = set()
+            import unicodedata as _ud
+
+            def _norm(s):
+                """Normaliza nome: minúsculas, sem acentos, sem espaços extras."""
+                s = str(s or "").strip().lower()
+                s = _ud.normalize("NFD", s)
+                s = "".join(c for c in s if _ud.category(c) != "Mn")
+                return s
+
+            def _name_match(starter_name, player_name):
+                """
+                Verifica se player_name bate com starter_name.
+                Aceita: match exato, sobrenome contido, ou qualquer token de 4+ chars presente.
+                """
+                sn = _norm(starter_name)
+                pn = _norm(player_name)
+                if pn == sn:
+                    return True
+                # Tokens do player (4+ chars) presentes no nome do starter
+                tokens = [t for t in pn.split() if len(t) >= 4]
+                if tokens and all(t in sn for t in tokens):
+                    return True
+                # Tokens do starter presentes no nome do player
+                tokens_s = [t for t in sn.split() if len(t) >= 4]
+                if tokens_s and all(t in pn for t in tokens_s):
+                    return True
+                return False
+
+            # Construir starting XI do time correto
+            starters_names = []
             for tl in lineups:
-                if tl.get("team", {}).get("name", "")[:10] in tname[:10]:
+                t_name = _norm(tl.get("team", {}).get("name", ""))
+                t_ref  = _norm(tname)
+                # Match por pelo menos 5 chars comuns no nome do time
+                common = sum(1 for tok in t_ref.split() if len(tok) >= 4 and tok in t_name)
+                if common >= 1 or t_ref[:8] in t_name:
                     for sp in tl.get("startXI", []):
-                        starters.add(sp["player"]["name"][:20].lower())
-            for p in plist[:3]:
-                pname_short = p["name"][:20].lower()
-                if starters and pname_short not in starters:
-                    g = p.get("goals", 0) or 0
-                    apps = p.get("apps", 1) or 1
-                    xg_loss = round(g / apps * 0.85, 2)
-                    result["absences"].append({
-                        "player": p["name"],
-                        "team": tname,
-                        "xg_loss": xg_loss,
-                        "note": f"Ausência detectada — perda estimada: -{xg_loss:.2f} xG/j",
-                    })
+                        sname = sp.get("player", {}).get("name", "")
+                        if sname:
+                            starters_names.append(sname)
+
+            if starters_names:
+                for p in plist[:3]:
+                    pname = p["name"]
+                    # Só marcar ausente se NENHUM starter faz match
+                    in_xi = any(_name_match(sn, pname) for sn in starters_names)
+                    if not in_xi:
+                        g    = p.get("goals", 0) or 0
+                        a_g  = p.get("assists", 0) or 0
+                        apps = p.get("apps", 1) or 1
+                        # Impact real: (G + A*0.6) / apps → perda xG + xA
+                        xg_loss = round((g / apps) * 0.75 + (a_g / apps) * 0.25, 2)
+                        # Redução vitória estimada
+                        part_team = (g + a_g) / max(total_goals + total_assists, 1)
+                        victory_reduction = round(part_team * 0.35 * 100, 1)
+                        result["absences"].append({
+                            "player": pname,
+                            "team": tname,
+                            "xg_loss": xg_loss,
+                            "victory_reduction_pct": victory_reduction,
+                            "note": (f"Ausente do XI — perda est.: -{xg_loss:.2f} xG+xA/j"
+                                     f"  |  Impacto vitória: -{victory_reduction:.1f}%"),
+                        })
 
     return result if (result["home"] or result["away"]) else None
 
@@ -5359,6 +5740,7 @@ def validate_high_ev(ev_report, model_audit, ensemble, threshold=0.20):
 
 
 def _render_calibration_panels(
+        lambda_trace=None,
         model_audit=None,
         lambda_explainer=None,
         confidence_v2=None,
@@ -5385,6 +5767,31 @@ def _render_calibration_panels(
     print("╔" + "═" * W + "╗")
     _row("🔬 FASE DE CALIBRAÇÃO PROFISSIONAL")
     print("╠" + "═" * W + "╣")
+
+    # ── LAMBDA TRACE ENGINE ──────────────────────────────────────────
+    if lambda_trace:
+        _section("🧮 LAMBDA TRACE ENGINE — RASTREAMENTO COMPLETO")
+        for side, sname in [("home", h_name), ("away", a_name)]:
+            d = lambda_trace.get(side, {})
+            if not d:
+                continue
+            lf = d.get("lambda_final", 0)
+            gf = d.get("base_gf", 0)
+            compress = d.get("compression_pct", 0)
+            warn = d.get("warning", False)
+            _row(f"▶ {sname[:30]}")
+            _row(f"  GF histórico:      {gf:.3f}  |  xG ponderado:   {d.get('base_xg',0):.3f}")
+            _row(f"  Blend (60% xG+40% GF): {d.get('blend_inicial',0):.3f}")
+            _row(f"  Defesa adversária: {d.get('def_adj',0):+.3f}  |  Field Tilt: {d.get('field_tilt_adj',0):+.3f}")
+            _row(f"  PPDA:              {d.get('ppda_adj',0):+.3f}  |  Clima:     {d.get('clima_adj',0):+.3f}")
+            _row(f"  Fadiga:            {d.get('fadiga_adj',0):+.3f}  |  Floor:    {d.get('floor',0):.3f}")
+            _row(f"  λ antes do floor:  {d.get('lambda_pre_floor',0):.3f}")
+            _row(f"  λ FINAL:           {lf:.3f}   (compressão vs GF: {compress:.1f}%)"
+                 + ("  ⚠️ POSSÍVEL COMPRESSÃO EXCESSIVA" if warn else ""))
+            if warn:
+                _row(f"  ⚠️  λ={lf:.3f} < GF={gf:.3f}×0.60 — Verificar dados de xG")
+            if side == "home" and lambda_trace.get("away"):
+                _sep()
 
     # ── MODEL AUDITOR ────────────────────────────────────────────────
     if model_audit:
@@ -5558,6 +5965,7 @@ def _render_pre_game_dashboard(
         explainability=None,
         data_quality=None,
         # FASE DE CALIBRAÇÃO PROFISSIONAL
+        lambda_trace=None,
         model_audit=None,
         lambda_explainer_data=None,
         confidence_v2=None,
@@ -5877,15 +6285,31 @@ def _render_pre_game_dashboard(
             av = a_tactical.get(ak, "?")
             _row(f"{attr:<26}  {str(hv)[:16]:>16}  {str(av)[:16]:>16}")
 
-    # ── MATCHUP TÁTICO V5 ─────────────────────────────────────────────
+    # ── MATCHUP TÁTICO V2 ─────────────────────────────────────────────
     if tactical_matchup:
-        _section(f"⚔️  MATCHUP TÁTICO — Score {tactical_matchup.get('score',50):.0f}/100")
+        score_tm = tactical_matchup.get("score", 50)
+        _section(f"⚔️  MATCHUP TÁTICO V2 — Tactical Edge Score: {score_tm:.0f}/100")
         _row(f"Resumo: {tactical_matchup.get('summary', '?')}")
+        # Edge breakdown
+        eb = tactical_matchup.get("edge_breakdown", {})
+        if eb:
+            _sep()
+            _row(f"{'FATOR':<16}  {'EDGE':>8}  (+ = vantagem {h_name[:10]})")
+            for factor, delta in eb.items():
+                icon = "▲" if delta > 0 else ("▼" if delta < 0 else "─")
+                _row(f"  {factor:<14}  {delta:>+7.1f} pts  {icon}")
         _sep()
         for adv in (tactical_matchup.get("advantages") or []):
             _row(f"✅ {adv[:65]}")
         for vuln in (tactical_matchup.get("vulnerabilities") or []):
             _row(f"⚠️  {vuln[:65]}")
+        # Narrativa tática
+        narr = tactical_matchup.get("narrative") or []
+        if narr:
+            _sep()
+            _row("📋 ANÁLISE NARRATIVA:")
+            for line in narr:
+                _row(f"  • {line[:65]}")
 
     # ── FADIGA E CALENDÁRIO V5 ────────────────────────────────────────
     if fatigue_h is not None or fatigue_a is not None:
@@ -6170,10 +6594,11 @@ def _render_pre_game_dashboard(
 
     # ── FASE DE CALIBRAÇÃO PROFISSIONAL ──────────────────────────────
     if any(x is not None for x in [
-            model_audit, lambda_explainer_data, confidence_v2,
+            lambda_trace, model_audit, lambda_explainer_data, confidence_v2,
             backtest_pro, placeholder_detector, ev_validation, explainability_total]):
         print()
         _render_calibration_panels(
+            lambda_trace=lambda_trace,
             model_audit=model_audit,
             lambda_explainer=lambda_explainer_data,
             confidence_v2=confidence_v2,
@@ -6258,10 +6683,14 @@ def execute_advanced_pre_live_analysis_v3():
 
     print("  ▸ Módulos matemáticos (xG, ELO, Monte Carlo)...")
 
-    # M1 — xG
+    # M1 — xG + Lambda calibrado (GF blend + sanity floor)
     h_wxg, h_wxga = calculate_weighted_xg(get_team_xg_history(h_hist, h_id))
     a_wxg, a_wxga = calculate_weighted_xg(get_team_xg_history(a_hist, a_id))
-    xg_lh, xg_la  = calculate_xg_lambdas(h_wxg, a_wxga, a_wxg, h_wxga)
+    xg_lh, xg_la  = calculate_xg_lambdas(
+        h_wxg, a_wxga, a_wxg, h_wxga,
+        avg_gf_home=h_blended.get("avg_gf"),
+        avg_gf_away=a_blended.get("avg_gf"),
+    )
 
     # M3 — ELO
     h_elo     = calculate_team_elo(h_id)
@@ -6274,22 +6703,12 @@ def execute_advanced_pre_live_analysis_v3():
     a_pi = calculate_historical_pressure_index(
         a_blended.get("avg_shots", 12), a_blended.get("avg_sot", 4.5), a_blended.get("avg_corners", 5))
 
-    # M5 — Poisson
+    # M5 — Poisson (lambdas serão refinados pelo Lambda Trace Engine abaixo)
+    # Usar lambdas preliminares do xG calibrado; recalculados após o trace.
     lh = xg_lh if xg_lh else h_blended.get("avg_gf", 1.2)
     la = xg_la if xg_la else a_blended.get("avg_gf", 0.9)
-    _hw = _dr = _aw = _btts = _o25 = 0.0
-    for _hg in range(10):
-        for _ag in range(10):
-            _p = poisson_probability(lh, _hg) * poisson_probability(la, _ag)
-            if _hg > _ag:    _hw   += _p
-            elif _hg == _ag: _dr   += _p
-            else:            _aw   += _p
-            if _hg > 0 and _ag > 0:    _btts += _p
-            if (_hg + _ag) > 2:        _o25  += _p
-    _s = _hw + _dr + _aw
-    if _s > 0:
-        _hw /= _s; _dr /= _s; _aw /= _s
-    xg_model_probs = {"home_win": _hw, "draw": _dr, "away_win": _aw, "btts": _btts, "over25": _o25}
+    # Poisson preliminar (será substituído após Lambda Trace Engine)
+    xg_model_probs = {"home_win": 0.33, "draw": 0.33, "away_win": 0.34, "btts": 0.50, "over25": 0.50}
 
     # M6 — Odds Movement
     odds_movement_result = track_odds_movement(fixture_id, real_odds) if real_odds else None
@@ -6302,16 +6721,9 @@ def execute_advanced_pre_live_analysis_v3():
     # M8 — Escanteios
     adv_corners = calculate_advanced_corners(h_blended, a_blended, h_pi["index"], a_pi["index"])
 
-    # M9 — Monte Carlo
-    mc = run_monte_carlo(
-        lh, la,
-        n_simulations=100000,
-        elo_weight=elo_probs["elo_diff"],
-        xg_lambda_home=xg_lh,
-        xg_lambda_away=xg_la,
-    )
-    mc_probs = {"home_win": mc["home_win"], "draw": mc["draw"], "away_win": mc["away_win"],
-                "btts": mc["btts"], "over25": mc["over25"]}
+    # M9 — Monte Carlo (placeholder; será recalculado após Lambda Trace Engine)
+    mc = None
+    mc_probs = None
 
     # M10 — ML
     h_rest = calculate_rest_days(h_hist[0]["fixture"]["date"][:10] if h_hist else None)
@@ -6319,26 +6731,10 @@ def execute_advanced_pre_live_analysis_v3():
     ml_probs = ml_model_predict(extract_ml_features(
         h_blended, a_blended, h_elo, a_elo, h_pi, a_pi, h_rest, a_rest, real_odds, ref_stats))
 
-    # M11 — Enhanced Confidence Score (V4)
-    conf = calculate_enhanced_confidence(
-        h_sample=len(h_hist), a_sample=len(a_hist),
-        poisson_probs={"home_win": _hw, "draw": _dr, "away_win": _aw},
-        mc_probs=mc_probs,
-        elo_probs={"home_win": elo_probs["home_win"], "draw": elo_probs["draw"],
-                   "away_win": elo_probs["away_win"]},
-        xg_probs=xg_model_probs,
-        real_odds=real_odds,
-    )
-
-    # M12 — Ensemble
-    ensemble = calculate_ensemble_probability(
-        poisson_probs=xg_model_probs,
-        mc_probs=mc_probs,
-        ml_probs=ml_probs,
-        xg_probs=xg_model_probs,
-        elo_probs={"home_win": elo_probs["home_win"], "draw": elo_probs["draw"],
-                   "away_win": elo_probs["away_win"]},
-    )
+    # M11 e M12 são calculados após o Lambda Trace Engine (abaixo)
+    # Placeholders para dependências anteriores ao trace:
+    conf    = {"score": 50, "label": "calculando...", "notes": []}
+    ensemble = None
 
     # EV Final (legacy)
     ev_final = {}
@@ -6360,9 +6756,6 @@ def execute_advanced_pre_live_analysis_v3():
     h_tactical = calculate_tactical_profile(h_hist, h_blended, h_id, lineups)
     a_tactical = calculate_tactical_profile(a_hist, a_blended, a_id, lineups)
 
-    print("  ▸ V5 — Matchup tático...")
-    tactical_matchup_v5 = calculate_tactical_matchup(h_tactical, a_tactical, h_name, a_name)
-
     print("  ▸ V5 — Fadiga & SOS (ELO real por adversário)...")
     fatigue_h_v5 = calculate_fatigue_index(h_hist, match_datetime)
     fatigue_a_v5 = calculate_fatigue_index(a_hist, match_datetime)
@@ -6383,6 +6776,15 @@ def execute_advanced_pre_live_analysis_v3():
     prog_a_v5  = calculate_progressive_actions(a_blended)
     zones_h_v5 = calculate_pressure_zones(h_blended)
     zones_a_v5 = calculate_pressure_zones(a_blended)
+
+    print("  ▸ V5 — Matchup tático V2 (PPDA + Field Tilt + xThreat + Zonas)...")
+    tactical_matchup_v5 = calculate_tactical_matchup(
+        h_tactical, a_tactical, h_name, a_name,
+        ppda_h=ppda_h_v5, ppda_a=ppda_a_v5,
+        field_tilt=field_tilt_v5, xthreat=xthreat_v5,
+        zones_h=zones_h_v5, zones_a=zones_a_v5,
+        lineups=lineups,
+    )
 
     print("  ▸ V5 — Distribuições temporais (eventos reais)...")
     goals_period_h_v5   = calculate_goals_by_period(detailed_h, h_id)
@@ -6433,17 +6835,92 @@ def execute_advanced_pre_live_analysis_v3():
         fatigue_h_v5, fatigue_a_v5, ensemble,
     )
 
-    # Lambda log detalhado
-    _h_wxg  = h_wxg  if h_wxg  is not None else 0.0
-    _a_wxg  = a_wxg  if a_wxg  is not None else 0.0
-    _h_wxga = h_wxga if h_wxga is not None else 0.0
-    _a_wxga = a_wxga if a_wxga is not None else 0.0
-    _xg_lh  = xg_lh  if xg_lh  is not None else h_blended.get("avg_gf", 1.2)
-    _xg_la  = xg_la  if xg_la  is not None else a_blended.get("avg_gf", 0.9)
-    print(f"\n  📊 Lambda LOG — Origem dos Lambdas:")
-    print(f"     {h_name[:16]}: xG={_h_wxg:.3f}  xGA_opp={_a_wxga:.3f}  avg_gf={h_blended.get('avg_gf',0):.2f}  λ={_xg_lh:.3f}")
-    print(f"     {a_name[:16]}: xG={_a_wxg:.3f}  xGA_opp={_h_wxga:.3f}  avg_gf={a_blended.get('avg_gf',0):.2f}  λ={_xg_la:.3f}")
-    print(f"     Fórmula: λ = 0.55×xG_time + 0.45×xGA_adversário")
+    # ── LAMBDA TRACE ENGINE ───────────────────────────────────────────
+    print("  ▸ Lambda Trace Engine...")
+    lambda_trace_v6 = calculate_lambda_trace(
+        h_wxg, a_wxga, a_wxg, h_wxga,
+        avg_gf_home=h_blended.get("avg_gf"),
+        avg_gf_away=a_blended.get("avg_gf"),
+        climate_impact=climate_impact_v5,
+        fatigue_h=fatigue_h_v5, fatigue_a=fatigue_a_v5,
+        field_tilt=field_tilt_v5,
+        ppda_h=ppda_h_v5, ppda_a=ppda_a_v5,
+        h_name=h_name, a_name=a_name,
+    )
+    # Usar lambdas do trace engine (mais precisos — incluem Field Tilt e PPDA)
+    lh = lambda_trace_v6["h_lambda_final"]
+    la = lambda_trace_v6["a_lambda_final"]
+
+    # Log de rastreamento
+    th = lambda_trace_v6["home"]
+    ta = lambda_trace_v6["away"]
+    print(f"\n  📊 LAMBDA TRACE ENGINE:")
+    print(f"     {h_name[:16]}: GF={th['base_gf']:.2f}  xG={th['base_xg']:.3f}  blend={th['blend_inicial']:.3f}  "
+          f"def={th['def_adj']:+.3f}  FT={th['field_tilt_adj']:+.3f}  PPDA={th['ppda_adj']:+.3f}  "
+          f"clima={th['clima_adj']:+.3f}  fat={th['fadiga_adj']:+.3f}  λ={lh:.3f}"
+          + ("  ⚠️ COMPRESSÃO" if th["warning"] else ""))
+    print(f"     {a_name[:16]}: GF={ta['base_gf']:.2f}  xG={ta['base_xg']:.3f}  blend={ta['blend_inicial']:.3f}  "
+          f"def={ta['def_adj']:+.3f}  FT={ta['field_tilt_adj']:+.3f}  PPDA={ta['ppda_adj']:+.3f}  "
+          f"clima={ta['clima_adj']:+.3f}  fat={ta['fadiga_adj']:+.3f}  λ={la:.3f}"
+          + ("  ⚠️ COMPRESSÃO" if ta["warning"] else ""))
+
+    # Recalcular Poisson e Monte Carlo com lambdas finais do trace
+    _hw = _dr = _aw = _btts = _o25 = 0.0
+    for _hg in range(10):
+        for _ag in range(10):
+            _p = poisson_probability(lh, _hg) * poisson_probability(la, _ag)
+            if _hg > _ag:    _hw   += _p
+            elif _hg == _ag: _dr   += _p
+            else:            _aw   += _p
+            if _hg > 0 and _ag > 0:    _btts += _p
+            if (_hg + _ag) > 2:        _o25  += _p
+    _s = _hw + _dr + _aw
+    if _s > 0:
+        _hw /= _s; _dr /= _s; _aw /= _s
+    xg_model_probs = {"home_win": _hw, "draw": _dr, "away_win": _aw, "btts": _btts, "over25": _o25}
+
+    # Monte Carlo com lambdas finais (sem double-blend)
+    print("  ▸ Monte Carlo (lambdas calibrados pelo trace engine)...")
+    mc = run_monte_carlo(
+        lh, la,
+        n_simulations=100000,
+        elo_weight=elo_probs["elo_diff"],
+    )
+    mc_probs = {"home_win": mc["home_win"], "draw": mc["draw"], "away_win": mc["away_win"],
+                "btts": mc["btts"], "over25": mc["over25"]}
+
+    # M11 — Enhanced Confidence Score (agora com dados reais de mc_probs/xg_model_probs)
+    conf = calculate_enhanced_confidence(
+        h_sample=len(h_hist), a_sample=len(a_hist),
+        poisson_probs=xg_model_probs,
+        mc_probs=mc_probs,
+        elo_probs={"home_win": elo_probs["home_win"], "draw": elo_probs["draw"],
+                   "away_win": elo_probs["away_win"]},
+        xg_probs=xg_model_probs,
+        real_odds=real_odds,
+    )
+
+    # M12 — Ensemble (com API como modelo real + Model Integrity Check)
+    _api_probs = None
+    if api_pred:
+        try:
+            ph = float(str(api_pred.get("percent_home", "0")).replace("%", "") or 0) / 100.0
+            pd = float(str(api_pred.get("percent_draw", "0")).replace("%", "") or 0) / 100.0
+            pa = float(str(api_pred.get("percent_away", "0")).replace("%", "") or 0) / 100.0
+            if ph > 0 or pd > 0 or pa > 0:
+                _api_probs = {"home_win": ph, "draw": pd, "away_win": pa}
+        except Exception:
+            _api_probs = None
+
+    ensemble = calculate_ensemble_probability(
+        poisson_probs=xg_model_probs,
+        mc_probs=mc_probs,
+        ml_probs=ml_probs,
+        xg_probs=xg_model_probs,
+        elo_probs={"home_win": elo_probs["home_win"], "draw": elo_probs["draw"],
+                   "away_win": elo_probs["away_win"]},
+        api_probs=_api_probs,
+    )
 
     # ── FASE DE CALIBRAÇÃO PROFISSIONAL ──────────────────────────────
     print("  ▸ CALIB — Model Auditor...")
@@ -6596,6 +7073,7 @@ def execute_advanced_pre_live_analysis_v3():
         explainability=explainability_v5,
         data_quality=data_quality_v5,
         # FASE DE CALIBRAÇÃO PROFISSIONAL
+        lambda_trace=lambda_trace_v6,
         model_audit=model_audit_v6,
         lambda_explainer_data=lambda_explainer_v6,
         confidence_v2=confidence_v2_v6,
