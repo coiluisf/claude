@@ -3284,6 +3284,949 @@ def scan_best_opportunities():
     input("\nENTER para voltar.")
 
 
+
+# =====================================================================
+# MÓDULOS V5 — ANÁLISE TÁTICA E ESTATÍSTICA AVANÇADA
+# =====================================================================
+
+def calculate_tactical_profile(hist, blended, team_id, lineups_data=None):
+    """Classifica perfil tático do time: posse, pressão, transição, etc."""
+    if not blended:
+        return {"style": "Indefinido", "possession_style": "N/A", "pressure": "N/A",
+                "transition": "N/A", "attack_zone": "N/A", "defensive_line": "N/A",
+                "construction": "N/A", "scores": {}}
+
+    possession = blended.get("avg_possession", 50) or 50
+    shots = blended.get("avg_shots", 12) or 12
+    sot = blended.get("avg_sot", 4) or 4
+    corners = blended.get("avg_corners", 5) or 5
+    gf = blended.get("avg_gf", 1.3) or 1.3
+    gc = blended.get("avg_gc", 1.1) or 1.1
+    attacks = blended.get("avg_attacks", 120) or 120
+    dangerous = blended.get("avg_dangerous_attacks", 40) or 40
+
+    scores = {}
+
+    # Posse de bola
+    if possession >= 58:
+        scores["possession_style"] = "Domínio Total"
+    elif possession >= 52:
+        scores["possession_style"] = "Jogo Posicional"
+    elif possession >= 46:
+        scores["possession_style"] = "Equilibrado"
+    else:
+        scores["possession_style"] = "Jogo Direto"
+
+    # Pressão alta
+    press_score = min(100, shots * 3 + dangerous * 0.8)
+    if press_score >= 75:
+        scores["pressure"] = "Alta Pressão"
+    elif press_score >= 50:
+        scores["pressure"] = "Pressão Moderada"
+    else:
+        scores["pressure"] = "Bloco Baixo"
+
+    # Estilo de transição
+    danger_ratio = dangerous / max(attacks, 1)
+    if danger_ratio >= 0.38:
+        scores["transition"] = "Transição Direta"
+    elif possession >= 55 and shots >= 14:
+        scores["transition"] = "Posse Ofensiva"
+    else:
+        scores["transition"] = "Controle Defensivo"
+
+    # Zona de ataque
+    if corners >= 7 and shots >= 15:
+        scores["attack_zone"] = "Ataque Aéreo+Chutes"
+    elif sot / max(shots, 1) >= 0.40:
+        scores["attack_zone"] = "Finalização Eficiente"
+    elif attacks >= 130:
+        scores["attack_zone"] = "Volume de Ataques"
+    else:
+        scores["attack_zone"] = "Ataque Padrão"
+
+    # Linha defensiva
+    if gc <= 0.8:
+        scores["defensive_line"] = "Defesa Sólida"
+    elif gc <= 1.2:
+        scores["defensive_line"] = "Defesa Organizada"
+    else:
+        scores["defensive_line"] = "Linha Alta / Vulnerável"
+
+    # Construção
+    if possession >= 56 and gf >= 1.5:
+        scores["construction"] = "Posse + Produção"
+    elif gf >= 1.8:
+        scores["construction"] = "Ataque Efetivo"
+    elif possession < 48 and gf >= 1.2:
+        scores["construction"] = "Contra-Ataque"
+    else:
+        scores["construction"] = "Pragmático"
+
+    # Estilo principal
+    if possession >= 57:
+        style = "Posse de Bola"
+    elif press_score >= 70 and possession < 55:
+        style = "Pressão Alta"
+    elif danger_ratio >= 0.40 and possession < 52:
+        style = "Transição Rápida"
+    elif gc <= 0.9:
+        style = "Defensivo / Sólido"
+    else:
+        style = "Equilibrado"
+
+    return {
+        "style": style,
+        "possession_style": scores["possession_style"],
+        "pressure": scores["pressure"],
+        "transition": scores["transition"],
+        "attack_zone": scores["attack_zone"],
+        "defensive_line": scores["defensive_line"],
+        "construction": scores["construction"],
+        "scores": scores,
+        "press_score": round(press_score, 1),
+        "possession": possession,
+    }
+
+
+def calculate_tactical_matchup(h_profile, a_profile, h_name, a_name):
+    """Compara perfis táticos e identifica vantagens/vulnerabilidades."""
+    if not h_profile or not a_profile:
+        return {"score": 50, "advantages": [], "vulnerabilities": [], "summary": "Dados insuficientes"}
+
+    advantages = []
+    vulnerabilities = []
+    score = 50  # neutro
+
+    h_press = h_profile.get("press_score", 50)
+    a_press = a_profile.get("press_score", 50)
+    h_poss = h_profile.get("possession", 50)
+    a_poss = a_profile.get("possession", 50)
+
+    # Posse vs pressão alta
+    if h_poss >= 55 and a_profile.get("pressure") == "Alta Pressão":
+        vulnerabilities.append(f"{h_name[:14]} pode sofrer com pressing alto do visitante")
+        score -= 5
+    if a_poss >= 55 and h_profile.get("pressure") == "Alta Pressão":
+        vulnerabilities.append(f"{a_name[:14]} pode ter dificuldade contra pressing do mandante")
+        score += 5
+
+    # Linha defensiva vs transição
+    if h_profile.get("transition") == "Transição Direta" and a_profile.get("defensive_line") == "Linha Alta / Vulnerável":
+        advantages.append(f"{h_name[:14]}: transição direta vs linha alta visitante — VANTAGEM")
+        score += 8
+    if a_profile.get("transition") == "Transição Direta" and h_profile.get("defensive_line") == "Linha Alta / Vulnerável":
+        advantages.append(f"{a_name[:14]}: transição direta vs linha alta mandante — VANTAGEM")
+        score -= 8
+
+    # Pressão
+    if h_press > a_press + 15:
+        advantages.append(f"{h_name[:14]}: superioridade de pressão ({h_press:.0f} vs {a_press:.0f})")
+        score += 6
+    elif a_press > h_press + 15:
+        advantages.append(f"{a_name[:14]}: superioridade de pressão ({a_press:.0f} vs {h_press:.0f})")
+        score -= 6
+
+    # Construção vs defesa
+    if h_profile.get("construction") == "Posse + Produção" and a_profile.get("defensive_line") == "Defesa Sólida":
+        vulnerabilities.append(f"{h_name[:14]}: posse pode ser neutralizada pela defesa sólida visitante")
+    if a_profile.get("construction") in ["Contra-Ataque", "Transição Direta"] and h_profile.get("defensive_line") == "Linha Alta / Vulnerável":
+        vulnerabilities.append(f"{h_name[:14]}: vulnerável ao contra-ataque visitante")
+        score -= 7
+
+    score = max(0, min(100, score))
+
+    if score >= 60:
+        summary = f"Vantagem tática para {h_name[:14]}"
+    elif score <= 40:
+        summary = f"Vantagem tática para {a_name[:14]}"
+    else:
+        summary = "Equilíbrio tático — jogo aberto"
+
+    return {
+        "score": score,
+        "advantages": advantages,
+        "vulnerabilities": vulnerabilities,
+        "summary": summary,
+        "h_style": h_profile.get("style", "?"),
+        "a_style": a_profile.get("style", "?"),
+    }
+
+
+def generate_scenarios(ensemble, mc, matchup, climate_impact, fatigue_h, fatigue_i_a, h_name, a_name):
+    """Gera 3 cenários probabilísticos com atributos detalhados."""
+    hw = ensemble.get("home_win", 0.35) if ensemble else 0.35
+    dr = ensemble.get("draw", 0.28) if ensemble else 0.28
+    aw = ensemble.get("away_win", 0.37) if ensemble else 0.37
+    o25 = ensemble.get("over25", 0.55) if ensemble else 0.55
+    btts = ensemble.get("btts", 0.50) if ensemble else 0.50
+
+    climate_penalty = climate_impact.get("total_penalty", 0) if climate_impact else 0
+    fat_diff = (fatigue_h or 30) - (fatigue_i_a or 30)
+
+    matchup_score = matchup.get("score", 50) if matchup else 50
+
+    # Cenário 1: Favorito vence
+    if hw >= aw:
+        s1_prob = hw
+        s1_title = f"Vitória do Mandante ({h_name[:16]})"
+        s1_goals = "1-0 ou 2-0 ou 2-1"
+        s1_desc = (f"{'Jogo aberto' if o25 > 0.55 else 'Jogo fechado'} com mandante "
+                   f"{'dominando a posse' if matchup_score >= 55 else 'aproveitando transições'}. "
+                   f"{'Clima desfavorável reduz ritmo.' if climate_penalty < -0.05 else ''}")
+        s1_key = ["Controle do mandante", f"BTTS: {'Provável' if btts > 0.52 else 'Improvável'}",
+                  f"Over 2.5: {'Sim' if o25 > 0.55 else 'Não'}"]
+    else:
+        s1_prob = aw
+        s1_title = f"Vitória do Visitante ({a_name[:16]})"
+        s1_goals = "0-1 ou 1-2 ou 0-2"
+        s1_desc = (f"Visitante impõe seu estilo. "
+                   f"{'Contra-ataque eficaz' if matchup.get('a_style') in ['Transição Rápida', 'Pressão Alta'] else 'Aproveitando fragilidade da defesa casa'}.")
+        s1_key = ["Contra-ataque visitante", f"Fatiga mandante: {'Alta' if fat_diff > 20 else 'Normal'}",
+                  f"Over 2.5: {'Sim' if o25 > 0.55 else 'Não'}"]
+
+    # Cenário 2: Empate
+    s2_prob = dr
+    s2_title = "Empate"
+    s2_goals = "0-0 ou 1-1 ou 2-2"
+    _s2_gols = "Jogo truncado com poucas chances." if o25 < 0.45 else "Jogo movimentado mas sem desequilíbrio."
+    _s2_chuva = " Chuva pode reduzir ritmo." if (climate_impact and climate_impact.get("rain_penalty", 0) < -0.03) else ""
+    s2_desc = "Equilíbrio entre os times. Ambas defesas sólidas. " + _s2_gols + _s2_chuva
+    s2_key = ["Equilíbrio tático", f"Under 2.5: {'Favorável' if o25 < 0.50 else 'Desfavorável'}",
+              f"Árbitro rígido = menos espaço"]
+
+    # Cenário 3: Jogo aberto/goleada
+    s3_prob = max(0.05, 1.0 - s1_prob - s2_prob)
+    if mc and mc.get("top_scores"):
+        top_score = mc["top_scores"][0][0]
+    else:
+        top_score = "2-1"
+    s3_title = "Jogo Imprevisível / Alta Goleada"
+    s3_goals = f"3+ gols  (Top MC: {top_score})"
+    s3_desc = ("Cenário de abertura tática: erros defensivos, "
+               f"expulsões precoces ou gols relâmpago. Clima {'adverso agrava' if climate_penalty < -0.05 else 'não é fator crítico'}.")
+    s3_key = ["Erros defensivos", "Gols em bola parada",
+              f"Over 3.5: {mc.get('over35', 0.20)*100:.0f}%" if mc else "Over 3.5: N/A"]
+
+    scenarios = [
+        {"id": 1, "title": s1_title, "prob": s1_prob, "goals": s1_goals, "desc": s1_desc, "keys": s1_key},
+        {"id": 2, "title": s2_title, "prob": s2_prob, "goals": s2_goals, "desc": s2_desc, "keys": s2_key},
+        {"id": 3, "title": s3_title, "prob": s3_prob, "goals": s3_goals, "desc": s3_desc, "keys": s3_key},
+    ]
+    # Ordenar por probabilidade
+    scenarios.sort(key=lambda x: x["prob"], reverse=True)
+    return scenarios
+
+
+def generate_narrative(scenarios, h_name, a_name, matchup, climate_impact, fatigue_h, fatigue_a, ensemble):
+    """Gera narrativa em linguagem natural sobre o desenvolvimento esperado."""
+    if not scenarios:
+        return "Dados insuficientes para gerar narrativa."
+
+    hw = ensemble.get("home_win", 0.33) if ensemble else 0.33
+    aw = ensemble.get("away_win", 0.33) if ensemble else 0.33
+    o25 = ensemble.get("over25", 0.50) if ensemble else 0.50
+    btts = ensemble.get("btts", 0.50) if ensemble else 0.50
+
+    favorito = h_name if hw > aw else a_name
+    underdog  = a_name if hw > aw else h_name
+    diff = abs(hw - aw)
+
+    fat_h = fatigue_h or 30
+    fat_a = fatigue_a or 30
+    climate_note = ""
+    if climate_impact:
+        if climate_impact.get("wind_penalty", 0) < -0.05:
+            climate_note = " O vento forte deve dificultar bolas aéreas e lances de bola parada."
+        elif climate_impact.get("rain_penalty", 0) < -0.05:
+            climate_note = " A chuva deve tornar o gramado lento e aumentar erros técnicos."
+        elif climate_impact.get("heat_penalty", 0) < -0.05:
+            climate_note = " O calor intenso pode afetar o ritmo físico na segunda metade."
+
+    if diff >= 0.20:
+        abertura = f"O {favorito[:16]} entra como claro favorito, com {max(hw,aw)*100:.0f}% de chance de vitória."
+    elif diff >= 0.08:
+        abertura = f"Leve vantagem para o {favorito[:16]}, mas o {underdog[:16]} é competitivo."
+    else:
+        abertura = f"Jogo extremamente equilibrado entre {h_name[:14]} e {a_name[:14]}."
+
+    if o25 >= 0.65:
+        gols_nota = f" Esperamos um jogo movimentado com mais de 2.5 gols ({o25*100:.0f}% prob)."
+    elif o25 <= 0.40:
+        gols_nota = f" Partida deve ser fechada, com poucos gols (Under 2.5 favorito a {(1-o25)*100:.0f}%)."
+    else:
+        gols_nota = f" Resultado pode ir para qualquer lado em termos de gols (Over 2.5 a {o25*100:.0f}%)."
+
+    fatiga_nota = ""
+    if fat_h >= 65 and fat_h > fat_a + 20:
+        fatiga_nota = f" {h_name[:14]} chega com alto índice de fadiga ({fat_h:.0f}/100), podendo perder força no 2T."
+    elif fat_a >= 65 and fat_a > fat_h + 20:
+        fatiga_nota = f" {a_name[:14]} chega mais desgastado ({fat_a:.0f}/100), favorecendo o mandante no 2T."
+
+    main_scenario = scenarios[0]
+    cenario_nota = f" O cenário mais provável ({main_scenario['prob']*100:.0f}%) é: {main_scenario['title']} — {main_scenario['goals']}."
+
+    narrative = abertura + gols_nota + fatiga_nota + climate_note + cenario_nota
+    return narrative
+
+
+def calculate_advanced_climate_impact(weather):
+    """Calcula coeficientes de impacto do clima sobre xG, ritmo, chutes, pressão, escanteios."""
+    if not weather:
+        return None
+
+    temp_c = weather.get("temp_c", 20)
+    humidity = weather.get("humidity", 60)
+    wind_kmph = weather.get("wind_kmph", 10)
+    precip_mm = weather.get("precip_mm", 0)
+    uv = weather.get("uv", 3)
+
+    # Penalidades (negativo = reduz, positivo = aumenta)
+    heat_penalty = 0.0
+    if temp_c >= 32:
+        heat_penalty = -0.12  # forte calor reduz ritmo
+    elif temp_c >= 28:
+        heat_penalty = -0.07
+    elif temp_c <= 5:
+        heat_penalty = -0.05  # frio intenso
+
+    humidity_penalty = 0.0
+    if humidity >= 85:
+        humidity_penalty = -0.05
+    elif humidity >= 75:
+        humidity_penalty = -0.02
+
+    wind_penalty = 0.0
+    corner_boost = 0.0
+    if wind_kmph >= 50:
+        wind_penalty = -0.15
+        corner_boost = 0.12  # vento forte = mais erros = mais escanteios
+    elif wind_kmph >= 35:
+        wind_penalty = -0.08
+        corner_boost = 0.07
+    elif wind_kmph >= 25:
+        wind_penalty = -0.04
+        corner_boost = 0.03
+
+    rain_penalty = 0.0
+    if precip_mm >= 10:
+        rain_penalty = -0.10  # chuva forte
+    elif precip_mm >= 3:
+        rain_penalty = -0.05
+    elif precip_mm >= 1:
+        rain_penalty = -0.02
+
+    # Coeficientes resultantes
+    xg_coeff = 1.0 + heat_penalty + humidity_penalty + rain_penalty + wind_penalty * 0.5
+    rhythm_coeff = 1.0 + heat_penalty * 1.2 + rain_penalty * 0.8
+    shots_coeff = 1.0 + wind_penalty * 0.6 + rain_penalty * 0.4
+    pressure_coeff = 1.0 + heat_penalty * 0.8 + humidity_penalty * 0.5
+    corner_coeff = 1.0 + corner_boost + rain_penalty * (-0.1)
+
+    total_penalty = heat_penalty + humidity_penalty + wind_penalty + rain_penalty
+
+    return {
+        "xg_coeff": round(xg_coeff, 3),
+        "rhythm_coeff": round(rhythm_coeff, 3),
+        "shots_coeff": round(shots_coeff, 3),
+        "pressure_coeff": round(pressure_coeff, 3),
+        "corner_coeff": round(corner_coeff, 3),
+        "heat_penalty": round(heat_penalty, 3),
+        "humidity_penalty": round(humidity_penalty, 3),
+        "wind_penalty": round(wind_penalty, 3),
+        "rain_penalty": round(rain_penalty, 3),
+        "total_penalty": round(total_penalty, 3),
+        "temp_c": temp_c,
+        "wind_kmph": wind_kmph,
+        "precip_mm": precip_mm,
+        "impact_label": (
+            "ALTO IMPACTO" if total_penalty <= -0.15 else
+            "IMPACTO MODERADO" if total_penalty <= -0.07 else
+            "BAIXO IMPACTO" if total_penalty <= -0.02 else
+            "SEM IMPACTO"
+        ),
+    }
+
+
+def calculate_fatigue_index(hist, match_datetime_str=None):
+    """Calcula índice de fadiga (0-100) baseado em descanso, viagens e carga de jogos."""
+    if not hist:
+        return 30  # default moderado
+
+    import datetime as _dt
+    try:
+        if match_datetime_str:
+            match_date = _dt.datetime.fromisoformat(match_datetime_str[:19])
+        else:
+            match_date = _dt.datetime.now()
+    except Exception:
+        match_date = _dt.datetime.now()
+
+    dates = []
+    for f in hist[:7]:
+        try:
+            d_str = f.get("fixture", {}).get("date", "")[:19]
+            if d_str:
+                dates.append(_dt.datetime.fromisoformat(d_str))
+        except Exception:
+            pass
+
+    if not dates:
+        return 30
+
+    dates.sort(reverse=True)
+    last_game = dates[0]
+    rest_days = (match_date - last_game).days
+
+    # Jogos nos últimos 7 e 14 dias
+    games_7  = sum(1 for d in dates if (match_date - d).days <= 7)
+    games_14 = sum(1 for d in dates if (match_date - d).days <= 14)
+
+    # Base: descanso ideal = 7 dias
+    rest_score = max(0, min(40, (7 - max(rest_days, 0)) * 6))  # 0-40 pontos
+
+    # Carga de jogos
+    load_score = min(30, games_7 * 10 + games_14 * 3)  # 0-30 pontos
+
+    # Bônus se último jogo foi viagem longa (heurística: sem dados de viagem)
+    travel_score = 8 if games_7 >= 2 else 0  # simplificado
+
+    fatigue = min(100, rest_score + load_score + travel_score)
+    return round(fatigue, 1)
+
+
+def calculate_sos(hist, team_id, all_elos=None):
+    """Calcula Strength of Schedule — qualidade média dos adversários nos últimos jogos."""
+    if not hist:
+        return {"sos_score": 50, "label": "Sem dados", "avg_opp_elo": 1500, "games": 0}
+
+    # Usa ELO dos adversários (se disponível) ou rank heurístico
+    opp_elos = []
+    for f in hist[:8]:
+        home_id = f.get("teams", {}).get("home", {}).get("id")
+        away_id = f.get("teams", {}).get("away", {}).get("id")
+        opp_id = away_id if int(home_id or 0) == int(team_id) else home_id
+        if opp_id and all_elos and opp_id in all_elos:
+            opp_elos.append(all_elos[opp_id])
+        else:
+            # Estimativa: opp_elo base 1500
+            opp_elos.append(1500)
+
+    if not opp_elos:
+        return {"sos_score": 50, "label": "Sem dados", "avg_opp_elo": 1500, "games": 0}
+
+    avg_elo = sum(opp_elos) / len(opp_elos)
+
+    if avg_elo >= 1650:
+        label = "Calendário Muito Difícil"
+        sos_score = 80
+    elif avg_elo >= 1580:
+        label = "Calendário Difícil"
+        sos_score = 65
+    elif avg_elo >= 1500:
+        label = "Calendário Moderado"
+        sos_score = 50
+    elif avg_elo >= 1420:
+        label = "Calendário Fácil"
+        sos_score = 35
+    else:
+        label = "Calendário Muito Fácil"
+        sos_score = 20
+
+    return {
+        "sos_score": sos_score,
+        "label": label,
+        "avg_opp_elo": round(avg_elo, 0),
+        "games": len(opp_elos),
+    }
+
+
+def calculate_ppda(hist, team_id):
+    """Calcula PPDA — Passes Permitidos por Ação Defensiva (proxy via stats da API)."""
+    # PPDA = passes_opp_allowed / (tackles + interceptions + fouls)
+    # Como a API não fornece isso diretamente por jogo, usamos proxy via blended
+    # tackles + interceptions são estimados via estatísticas disponíveis
+    if not hist:
+        return {"ppda": 11.0, "label": "Médio", "games": 0}
+
+    ppda_vals = []
+    for f in hist[:8]:
+        stats = f.get("statistics", [])
+        if not stats:
+            continue
+        for team_stats in stats:
+            t_id = team_stats.get("team", {}).get("id")
+            if int(t_id or 0) != int(team_id):
+                continue
+            stat_dict = {s["type"].lower(): (s["value"] or 0) for s in team_stats.get("statistics", [])}
+            fouls = stat_dict.get("fouls", 0) or 0
+            # Proxy: fouls como ações defensivas, passes opp = total shots opp * 5 (heurístico)
+            shots_opp = stat_dict.get("total shots", stat_dict.get("shots on goal", 0)) or 0
+            passes_opp = shots_opp * 6  # heurístico: 6 passes por chance
+            def_actions = max(fouls + 2, 1)  # tackles estimado como fouls+2
+            if passes_opp > 0:
+                ppda_vals.append(passes_opp / def_actions)
+
+    if not ppda_vals:
+        return {"ppda": 11.0, "label": "Médio", "games": 0}
+
+    avg_ppda = sum(ppda_vals) / len(ppda_vals)
+
+    if avg_ppda <= 7:
+        label = "Pressing Intenso"
+    elif avg_ppda <= 10:
+        label = "Pressing Moderado"
+    elif avg_ppda <= 14:
+        label = "Pressing Baixo"
+    else:
+        label = "Bloco Recuado"
+
+    return {"ppda": round(avg_ppda, 2), "label": label, "games": len(ppda_vals)}
+
+
+def calculate_field_tilt(blended_h, blended_a):
+    """Calcula dominância territorial (Field Tilt) — % de ataques no campo adversário."""
+    if not blended_h or not blended_a:
+        return {"home_tilt": 50.0, "away_tilt": 50.0, "label": "Equilibrado"}
+
+    h_att = blended_h.get("avg_attacks", 100) or 100
+    a_att = blended_a.get("avg_attacks", 100) or 100
+    h_da  = blended_h.get("avg_dangerous_attacks", 35) or 35
+    a_da  = blended_a.get("avg_dangerous_attacks", 35) or 35
+    h_corn = blended_h.get("avg_corners", 5) or 5
+    a_corn = blended_a.get("avg_corners", 5) or 5
+
+    h_score = h_att * 0.4 + h_da * 1.0 + h_corn * 2.0
+    a_score = a_att * 0.4 + a_da * 1.0 + a_corn * 2.0
+    total = h_score + a_score
+    if total == 0:
+        return {"home_tilt": 50.0, "away_tilt": 50.0, "label": "Equilibrado"}
+
+    h_tilt = (h_score / total) * 100
+    a_tilt = 100.0 - h_tilt
+
+    if h_tilt >= 60:
+        label = "Domínio Territorial Mandante"
+    elif a_tilt >= 60:
+        label = "Domínio Territorial Visitante"
+    elif h_tilt >= 55:
+        label = "Leve Domínio Mandante"
+    elif a_tilt >= 55:
+        label = "Leve Domínio Visitante"
+    else:
+        label = "Equilíbrio Territorial"
+
+    return {
+        "home_tilt": round(h_tilt, 1),
+        "away_tilt": round(a_tilt, 1),
+        "label": label,
+    }
+
+
+def calculate_enhanced_xthreat(blended_h, blended_a):
+    """xThreat criado vs concedido para cada time — índice 0-100."""
+    def _xt(blended):
+        if not blended:
+            return {"created": 50.0, "conceded": 50.0, "net": 0.0, "label": "Neutro"}
+        sot = blended.get("avg_sot", 4) or 4
+        shots = blended.get("avg_shots", 12) or 12
+        corners = blended.get("avg_corners", 5) or 5
+        gf = blended.get("avg_gf", 1.2) or 1.2
+        gc = blended.get("avg_gc", 1.2) or 1.2
+        dangerous = blended.get("avg_dangerous_attacks", 35) or 35
+
+        # xThreat criado
+        created = min(100, sot * 5 + shots * 1.5 + corners * 1.5 + gf * 8 + dangerous * 0.3)
+        # xThreat concedido
+        conceded = min(100, gc * 10 + (12 - sot) * 1.5)
+
+        net = created - conceded
+        if net >= 20:
+            label = "Ameaça Dominante"
+        elif net >= 8:
+            label = "Ligeira Vantagem"
+        elif net >= -8:
+            label = "Equilibrado"
+        elif net >= -20:
+            label = "Ligeiro Risco"
+        else:
+            label = "Sob Pressão"
+
+        return {"created": round(created, 1), "conceded": round(conceded, 1),
+                "net": round(net, 1), "label": label}
+
+    h = _xt(blended_h)
+    a = _xt(blended_a)
+    return {"home": h, "away": a}
+
+
+def calculate_progressive_actions(blended):
+    """Estima ações progressivas: passes progressivos, conduções e finalizações profundas."""
+    if not blended:
+        return {"prog_passes": 0, "prog_carries": 0, "deep_completions": 0, "label": "Sem dados"}
+
+    possession = blended.get("avg_possession", 50) or 50
+    attacks = blended.get("avg_attacks", 100) or 100
+    dangerous = blended.get("avg_dangerous_attacks", 35) or 35
+    corners = blended.get("avg_corners", 5) or 5
+    shots = blended.get("avg_shots", 12) or 12
+
+    # Estimativas baseadas em métricas disponíveis
+    prog_passes = round(possession * 0.8 + attacks * 0.15, 1)
+    prog_carries = round(attacks * 0.12 + dangerous * 0.25, 1)
+    deep_completions = round(shots * 0.6 + corners * 0.4, 1)
+
+    total = prog_passes + prog_carries + deep_completions
+    if total >= 80:
+        label = "Alta Progressividade"
+    elif total >= 55:
+        label = "Progressividade Moderada"
+    else:
+        label = "Baixa Progressividade"
+
+    return {
+        "prog_passes": prog_passes,
+        "prog_carries": prog_carries,
+        "deep_completions": deep_completions,
+        "total": round(total, 1),
+        "label": label,
+    }
+
+
+def calculate_pressure_zones(blended):
+    """Estima recuperações por zona: alta, média e baixa pressão."""
+    if not blended:
+        return {"high_press": 0, "mid_press": 0, "low_press": 0, "label": "Sem dados"}
+
+    possession = blended.get("avg_possession", 50) or 50
+    dangerous = blended.get("avg_dangerous_attacks", 35) or 35
+    attacks = blended.get("avg_attacks", 100) or 100
+    fouls_pg = blended.get("avg_fouls", 12) or 12
+
+    # Alta pressão = pressing no campo adversário
+    high_press = round(possession * 0.25 + dangerous * 0.3 + fouls_pg * 0.15, 1)
+    # Média = zona de pressão intermediária
+    mid_press = round(attacks * 0.15 + fouls_pg * 0.25, 1)
+    # Baixa = bloco defensivo
+    low_press = max(0, round(45 - possession * 0.25 + fouls_pg * 0.1, 1))
+
+    total = high_press + mid_press + low_press
+    if total > 0:
+        high_pct = high_press / total * 100
+    else:
+        high_pct = 33.3
+
+    if high_pct >= 45:
+        label = "Pressing Alto Predominante"
+    elif high_pct >= 33:
+        label = "Pressão Mista"
+    else:
+        label = "Bloco Recuado"
+
+    return {
+        "high_press": high_press,
+        "mid_press": mid_press,
+        "low_press": low_press,
+        "high_pct": round(high_pct, 1),
+        "label": label,
+    }
+
+
+def calculate_goals_by_period(hist, team_id):
+    """Distribuição temporal de gols (marcados e sofridos) em 6 períodos de 15 min."""
+    periods = ["0-15", "16-30", "31-45", "46-60", "61-75", "76-90"]
+    scored = {p: 0 for p in periods}
+    conceded = {p: 0 for p in periods}
+    games = 0
+
+    for f in hist[:15]:
+        goals = f.get("goals", {})
+        home_id = f.get("teams", {}).get("home", {}).get("id")
+        is_home = int(home_id or 0) == int(team_id)
+
+        events = f.get("events", [])
+        if not events:
+            games += 1
+            continue
+
+        for ev in events:
+            if ev.get("type") != "Goal":
+                continue
+            minute = ev.get("time", {}).get("elapsed") or 0
+            scorer_team = ev.get("team", {}).get("id")
+            is_own_goal = (ev.get("detail") or "").lower().find("own") >= 0
+
+            if minute <= 15:    period = "0-15"
+            elif minute <= 30:  period = "16-30"
+            elif minute <= 45:  period = "31-45"
+            elif minute <= 60:  period = "46-60"
+            elif minute <= 75:  period = "61-75"
+            else:               period = "76-90"
+
+            is_team_goal = (int(scorer_team or 0) == int(team_id)) != is_own_goal
+            if is_team_goal:
+                scored[period] += 1
+            else:
+                conceded[period] += 1
+        games += 1
+
+    if games == 0:
+        games = 1
+
+    return {
+        "periods": periods,
+        "scored": {p: round(scored[p] / games, 2) for p in periods},
+        "conceded": {p: round(conceded[p] / games, 2) for p in periods},
+        "games": games,
+        "peak_scored": max(periods, key=lambda p: scored[p]),
+        "peak_conceded": max(periods, key=lambda p: conceded[p]),
+    }
+
+
+def calculate_corners_by_period(hist, team_id):
+    """Distribuição temporal de escanteios em 6 períodos."""
+    periods = ["0-15", "16-30", "31-45", "46-60", "61-75", "76-90"]
+    for_team = {p: 0 for p in periods}
+    against = {p: 0 for p in periods}
+    games = 0
+
+    for f in hist[:15]:
+        home_id = f.get("teams", {}).get("home", {}).get("id")
+        is_home = int(home_id or 0) == int(team_id)
+        events = f.get("events", [])
+        if not events:
+            games += 1
+            continue
+
+        for ev in events:
+            if ev.get("type") != "subst" and "corner" not in (ev.get("detail") or "").lower():
+                continue
+            if "corner" not in (ev.get("detail") or "").lower():
+                continue
+            minute = ev.get("time", {}).get("elapsed") or 0
+            ev_team = ev.get("team", {}).get("id")
+
+            if minute <= 15:    period = "0-15"
+            elif minute <= 30:  period = "16-30"
+            elif minute <= 45:  period = "31-45"
+            elif minute <= 60:  period = "46-60"
+            elif minute <= 75:  period = "61-75"
+            else:               period = "76-90"
+
+            if int(ev_team or 0) == int(team_id):
+                for_team[period] += 1
+            else:
+                against[period] += 1
+        games += 1
+
+    if games == 0:
+        games = 1
+
+    return {
+        "periods": periods,
+        "for_team": {p: round(for_team[p] / games, 2) for p in periods},
+        "against": {p: round(against[p] / games, 2) for p in periods},
+        "games": games,
+        "peak_for": max(periods, key=lambda p: for_team[p]),
+    }
+
+
+def calculate_cards_by_period(hist, team_id):
+    """Distribuição temporal de cartões e faltas em 6 períodos."""
+    periods = ["0-15", "16-30", "31-45", "46-60", "61-75", "76-90"]
+    yellows = {p: 0 for p in periods}
+    reds = {p: 0 for p in periods}
+    games = 0
+
+    for f in hist[:15]:
+        home_id = f.get("teams", {}).get("home", {}).get("id")
+        events = f.get("events", [])
+        if not events:
+            games += 1
+            continue
+
+        for ev in events:
+            if ev.get("type") != "Card":
+                continue
+            minute = ev.get("time", {}).get("elapsed") or 0
+            ev_team = ev.get("team", {}).get("id")
+            detail = (ev.get("detail") or "").lower()
+
+            if int(ev_team or 0) != int(team_id):
+                continue
+
+            if minute <= 15:    period = "0-15"
+            elif minute <= 30:  period = "16-30"
+            elif minute <= 45:  period = "31-45"
+            elif minute <= 60:  period = "46-60"
+            elif minute <= 75:  period = "61-75"
+            else:               period = "76-90"
+
+            if "yellow" in detail:
+                yellows[period] += 1
+            elif "red" in detail:
+                reds[period] += 1
+        games += 1
+
+    if games == 0:
+        games = 1
+
+    return {
+        "periods": periods,
+        "yellows": {p: round(yellows[p] / games, 2) for p in periods},
+        "reds": {p: round(reds[p] / games, 2) for p in periods},
+        "games": games,
+        "peak_yellow": max(periods, key=lambda p: yellows[p]),
+        "peak_red": max(periods, key=lambda p: reds[p]),
+    }
+
+
+def calculate_dominance_score(h_elo, a_elo, h_pi, a_pi, ensemble, ppda_h, ppda_a,
+                               field_tilt, xthreat, climate_impact, fatigue_h, fatigue_a):
+    """Expected Dominance Score 0-100 composto de múltiplos módulos."""
+    score = 50.0  # base neutra
+
+    # ELO (peso 20%)
+    elo_h = h_elo.get("elo", 1500) if h_elo else 1500
+    elo_a = a_elo.get("elo", 1500) if a_elo else 1500
+    elo_diff = (elo_h - elo_a) / 200.0  # normalizado
+    score += elo_diff * 10  # contribuição ELO
+
+    # xG (peso 15%)
+    if ensemble:
+        hw = ensemble.get("home_win", 0.33)
+        aw = ensemble.get("away_win", 0.33)
+        score += (hw - aw) * 20
+
+    # Pressure Index (peso 15%)
+    if h_pi and a_pi:
+        pi_diff = (h_pi.get("index", 50) - a_pi.get("index", 50)) / 100.0
+        score += pi_diff * 12
+
+    # PPDA (peso 10%)
+    ppda_h_val = ppda_h.get("ppda", 11) if ppda_h else 11
+    ppda_a_val = ppda_a.get("ppda", 11) if ppda_a else 11
+    # Menor PPDA = melhor pressing
+    ppda_diff = (ppda_a_val - ppda_h_val) / 10.0
+    score += ppda_diff * 5
+
+    # Field Tilt (peso 15%)
+    if field_tilt:
+        tilt_h = field_tilt.get("home_tilt", 50)
+        tilt_diff = (tilt_h - 50) / 50.0
+        score += tilt_diff * 10
+
+    # xThreat (peso 10%)
+    if xthreat:
+        xt_h_net = xthreat.get("home", {}).get("net", 0)
+        xt_a_net = xthreat.get("away", {}).get("net", 0)
+        xt_diff = (xt_h_net - xt_a_net) / 30.0
+        score += xt_diff * 5
+
+    # Climate (peso 5%)
+    if climate_impact:
+        score += climate_impact.get("total_penalty", 0) * 5
+
+    # Fatigue (peso 10%)
+    if fatigue_h is not None and fatigue_a is not None:
+        fat_diff = (fatigue_a - fatigue_h) / 100.0
+        score += fat_diff * 8
+
+    score = max(0, min(100, score))
+
+    if score >= 65:
+        label = "Dominância Mandante"
+    elif score >= 55:
+        label = "Leve Vantagem Mandante"
+    elif score >= 45:
+        label = "Equilíbrio"
+    elif score >= 35:
+        label = "Leve Vantagem Visitante"
+    else:
+        label = "Dominância Visitante"
+
+    return {"score": round(score, 1), "label": label}
+
+
+def calculate_prediction_confidence_index(h_hist, a_hist, ensemble, conf,
+                                           xthreat, dominance_score, sos_h, sos_a):
+    """Índice de Confiança da Predição: qty dados + variância + consistência + divergência."""
+    score = 0
+    notes = []
+
+    # 1. Quantidade de dados
+    h_n = len(h_hist) if h_hist else 0
+    a_n = len(a_hist) if a_hist else 0
+    data_qty = (h_n + a_n) / 2
+    if data_qty >= 8:
+        score += 25
+        notes.append(f"Base dados: Excelente ({data_qty:.0f} j/time)")
+    elif data_qty >= 5:
+        score += 15
+        notes.append(f"Base dados: Boa ({data_qty:.0f} j/time)")
+    else:
+        score += 5
+        notes.append(f"Base dados: Insuficiente ({data_qty:.0f} j/time)")
+
+    # 2. Consistência do modelo ensemble
+    base_conf = conf.get("score", 50) if conf else 50
+    score += base_conf * 0.25
+    notes.append(f"Confiança ensemble: {base_conf}/100")
+
+    # 3. Divergência entre modelos (via ensemble sources used)
+    if ensemble:
+        hw_vals = [
+            ensemble.get("home_win", 0.33),
+        ]
+        # Se sources_used >= 3, baixa divergência
+        n_sources = len(ensemble.get("sources_used", []))
+        if n_sources >= 4:
+            score += 20
+            notes.append("Convergência multi-modelo: Alta")
+        elif n_sources >= 2:
+            score += 12
+            notes.append("Convergência multi-modelo: Moderada")
+        else:
+            score += 5
+            notes.append("Convergência multi-modelo: Baixa")
+
+    # 4. xThreat net consistência
+    if xthreat:
+        h_net = abs(xthreat.get("home", {}).get("net", 0))
+        if h_net >= 15:
+            score += 10
+            notes.append("xThreat: Sinal claro")
+        elif h_net >= 5:
+            score += 5
+            notes.append("xThreat: Sinal moderado")
+
+    # 5. SOS penalidade (forma inflada vs calendário fácil)
+    sos_h_s = sos_h.get("sos_score", 50) if sos_h else 50
+    sos_a_s = sos_a.get("sos_score", 50) if sos_a else 50
+    sos_avg = (sos_h_s + sos_a_s) / 2
+    if sos_avg >= 60:
+        score -= 5
+        notes.append("Calendário difícil — forma pode ser inflada")
+    elif sos_avg <= 35:
+        score += 5
+        notes.append("Calendário fácil — forma pode ser superestimada")
+
+    score = max(0, min(100, score))
+
+    if score >= 75:
+        label = "Confiança Muito Alta"
+    elif score >= 60:
+        label = "Confiança Alta"
+    elif score >= 45:
+        label = "Confiança Moderada"
+    elif score >= 30:
+        label = "Confiança Baixa"
+    else:
+        label = "Confiança Muito Baixa"
+
+    return {"score": round(score, 1), "label": label, "notes": notes}
+
+
 def _render_pre_game_dashboard(
         h_name, a_name, fixture_id,
         h_id, a_id,
@@ -3308,6 +4251,24 @@ def _render_pre_game_dashboard(
         league_name=None,
         ev_report=None,
         recommendations=None,
+        # V5 — new modules
+        h_tactical=None, a_tactical=None,
+        tactical_matchup=None,
+        scenarios=None,
+        narrative=None,
+        climate_impact=None,
+        fatigue_h=None, fatigue_a=None,
+        sos_h=None, sos_a=None,
+        ppda_h=None, ppda_a=None,
+        field_tilt=None,
+        xthreat=None,
+        prog_h=None, prog_a=None,
+        zones_h=None, zones_a=None,
+        goals_period_h=None, goals_period_a=None,
+        corners_period_h=None, corners_period_a=None,
+        cards_period_h=None, cards_period_a=None,
+        dominance_score=None,
+        prediction_confidence=None,
         W=70):
     """Renderiza toda a análise pré-jogo em formato visual profissional."""
 
@@ -3602,6 +4563,200 @@ def _render_pre_game_dashboard(
             _row(f"   Top 5: {top3}")
         _row(f"📊 Fontes ensemble: {', '.join(ensemble.get('sources_used', []))}")
 
+    # ── PERFIS TÁTICOS V5 ─────────────────────────────────────────────
+    if h_tactical and a_tactical:
+        _section("🧠 PERFIS TÁTICOS — V5")
+        _row(f"{'ATRIBUTO':<26}  {h_name[:16]:>16}  {a_name[:16]:>16}")
+        _sep()
+        for attr, hk, ak in [
+            ("Estilo Principal",  "style",          "style"),
+            ("Posse",             "possession_style","possession_style"),
+            ("Pressão",          "pressure",        "pressure"),
+            ("Transição",        "transition",      "transition"),
+            ("Zona de Ataque",   "attack_zone",     "attack_zone"),
+            ("Linha Defensiva",  "defensive_line",  "defensive_line"),
+            ("Construção",       "construction",    "construction"),
+        ]:
+            hv = h_tactical.get(hk, "?")
+            av = a_tactical.get(ak, "?")
+            _row(f"{attr:<26}  {str(hv)[:16]:>16}  {str(av)[:16]:>16}")
+
+    # ── MATCHUP TÁTICO V5 ─────────────────────────────────────────────
+    if tactical_matchup:
+        _section(f"⚔️  MATCHUP TÁTICO — Score {tactical_matchup.get('score',50):.0f}/100")
+        _row(f"Resumo: {tactical_matchup.get('summary', '?')}")
+        _sep()
+        for adv in (tactical_matchup.get("advantages") or []):
+            _row(f"✅ {adv[:65]}")
+        for vuln in (tactical_matchup.get("vulnerabilities") or []):
+            _row(f"⚠️  {vuln[:65]}")
+
+    # ── FADIGA E CALENDÁRIO V5 ────────────────────────────────────────
+    if fatigue_h is not None or fatigue_a is not None:
+        _section("🏃 FADIGA & CALENDÁRIO (SOS)")
+        fat_h_val = fatigue_h or 0
+        fat_a_val = fatigue_a or 0
+        bar_h = _render_bar(int(fat_h_val), 100, 18)
+        bar_a = _render_bar(int(fat_a_val), 100, 18)
+        _row(f"{h_name[:22]:<22}  Fadiga: {fat_h_val:>5.1f}/100  {bar_h}")
+        _row(f"{a_name[:22]:<22}  Fadiga: {fat_a_val:>5.1f}/100  {bar_a}")
+        if sos_h and sos_a:
+            _sep()
+            _row(f"SOS {h_name[:14]}: {sos_h.get('label','?')} (ELO médio oponentes: {sos_h.get('avg_opp_elo',1500):.0f})")
+            _row(f"SOS {a_name[:14]}: {sos_a.get('label','?')} (ELO médio oponentes: {sos_a.get('avg_opp_elo',1500):.0f})")
+
+    # ── IMPACTO CLIMÁTICO AVANÇADO V5 ────────────────────────────────
+    if climate_impact:
+        _section(f"🌦️  IMPACTO CLIMÁTICO AVANÇADO — {climate_impact.get('impact_label','?')}")
+        _row(f"{'COEFICIENTE':<24}  {'VALOR':>10}  {'EFEITO':<30}")
+        _sep()
+        for label, key in [("xG coeff", "xg_coeff"), ("Ritmo coeff", "rhythm_coeff"),
+                            ("Chutes coeff", "shots_coeff"), ("Pressão coeff", "pressure_coeff"),
+                            ("Escanteios coeff", "corner_coeff")]:
+            val = climate_impact.get(key, 1.0)
+            effect = "Neutro" if abs(val-1.0) < 0.02 else ("Reduz" if val < 1.0 else "Aumenta")
+            effect_icon = "🟢" if val >= 1.0 else ("🟡" if val >= 0.92 else "🔴")
+            _row(f"{label:<24}  {val:>10.3f}  {effect_icon} {effect}")
+        _row(f"Penalidade Total: {climate_impact.get('total_penalty',0):+.3f}  |  Temp: {climate_impact.get('temp_c',20)}°C  Vento: {climate_impact.get('wind_kmph',0)}km/h  Precip: {climate_impact.get('precip_mm',0)}mm")
+
+    # ── PPDA e FIELD TILT V5 ─────────────────────────────────────────
+    if ppda_h or ppda_a or field_tilt:
+        _section("🎯 PPDA & DOMINÂNCIA TERRITORIAL")
+        if ppda_h and ppda_a:
+            _row(f"PPDA {h_name[:18]}: {ppda_h.get('ppda',0):.2f}  → {ppda_h.get('label','?')}")
+            _row(f"PPDA {a_name[:18]}: {ppda_a.get('ppda',0):.2f}  → {ppda_a.get('label','?')}")
+            _row("  (PPDA menor = pressing mais intenso)")
+        if field_tilt:
+            _sep()
+            bar_ht = _render_bar(int(field_tilt.get("home_tilt", 50)), 100, 20)
+            bar_at = _render_bar(int(field_tilt.get("away_tilt", 50)), 100, 20)
+            _row(f"Field Tilt {h_name[:12]}: {field_tilt.get('home_tilt',50):.1f}%  {bar_ht}")
+            _row(f"Field Tilt {a_name[:12]}: {field_tilt.get('away_tilt',50):.1f}%  {bar_at}")
+            _row(f"Diagnóstico: {field_tilt.get('label','?')}")
+
+    # ── xTHREAT AVANÇADO V5 ──────────────────────────────────────────
+    if xthreat:
+        _section("⚡ xTHREAT — AMEAÇA ESPERADA")
+        _row(f"{'TIME':<22}  {'xT Criado':>10}  {'xT Conced.':>10}  {'Saldo':>8}  {'Label':<20}")
+        _sep()
+        for name, key in [(h_name, "home"), (a_name, "away")]:
+            xt = xthreat.get(key, {})
+            created = xt.get("created", 0)
+            conceded = xt.get("conceded", 0)
+            net = xt.get("net", 0)
+            label = xt.get("label", "?")
+            net_icon = "🟢" if net >= 8 else ("🟡" if net >= -8 else "🔴")
+            _row(f"{name[:22]:<22}  {created:>10.1f}  {conceded:>10.1f}  {net_icon}{net:>+7.1f}  {label:<20}")
+
+    # ── AÇÕES PROGRESSIVAS V5 ────────────────────────────────────────
+    if prog_h or prog_a:
+        _section("🔄 AÇÕES PROGRESSIVAS")
+        _row(f"{'MÉTRICA':<26}  {h_name[:16]:>16}  {a_name[:16]:>16}")
+        _sep()
+        for label, key in [
+            ("Passes Progressivos", "prog_passes"),
+            ("Conduções Prog.",     "prog_carries"),
+            ("Finalizações Profundas","deep_completions"),
+            ("Total",              "total"),
+        ]:
+            hv = (prog_h or {}).get(key, 0)
+            av = (prog_a or {}).get(key, 0)
+            _row(f"{label:<26}  {hv:>16.1f}  {av:>16.1f}")
+        _row(f"{h_name[:14]}: {(prog_h or {}).get('label','?')}  |  {a_name[:14]}: {(prog_a or {}).get('label','?')}")
+
+    # ── PRESSÃO POR ZONAS V5 ─────────────────────────────────────────
+    if zones_h or zones_a:
+        _section("🗺️  PRESSÃO POR ZONAS")
+        _row(f"{'ZONA':<20}  {h_name[:16]:>16}  {a_name[:16]:>16}")
+        _sep()
+        for label, key in [
+            ("Alta Pressão", "high_press"),
+            ("Pressão Média","mid_press"),
+            ("Bloco Baixo",  "low_press"),
+        ]:
+            hv = (zones_h or {}).get(key, 0)
+            av = (zones_a or {}).get(key, 0)
+            _row(f"{label:<20}  {hv:>16.1f}  {av:>16.1f}")
+        _row(f"Alta Pressão %: {h_name[:10]} {(zones_h or {}).get('high_pct',0):.0f}%  |  {a_name[:10]} {(zones_a or {}).get('high_pct',0):.0f}%")
+
+    # ── DISTRIBUIÇÃO TEMPORAL — GOLS V5 ──────────────────────────────
+    def _render_period_table(title, data_h, data_a, key, suffix=""):
+        if not data_h and not data_a:
+            return
+        periods = ["0-15", "16-30", "31-45", "46-60", "61-75", "76-90"]
+        _section(title)
+        header = f"{'PERÍODO':<10}" + "".join(f"  {p:>7}" for p in periods)
+        _row(header)
+        _sep()
+        for name, data in [(h_name[:14], data_h), (a_name[:14], data_a)]:
+            if data:
+                vals_scored = data.get(key, {})
+                row_s = f"{name:<14}" + "".join(f"  {vals_scored.get(p,0):>7.2f}" for p in periods)
+                _row(row_s + suffix)
+
+    _render_period_table("⏱️  GOLS POR PERÍODO (marcados/j)", goals_period_h, goals_period_a, "scored")
+    if goals_period_h or goals_period_a:
+        _section("⏱️  GOLS POR PERÍODO (sofridos/j)")
+        periods = ["0-15", "16-30", "31-45", "46-60", "61-75", "76-90"]
+        for name, data in [(h_name[:14], goals_period_h), (a_name[:14], goals_period_a)]:
+            if data:
+                vals = data.get("conceded", {})
+                row = f"{name:<14}" + "".join(f"  {vals.get(p,0):>7.2f}" for p in periods)
+                _row(row)
+        if goals_period_h:
+            _row(f"Pico gols marcados {h_name[:12]}: {goals_period_h.get('peak_scored','?')}  |  Pico sofridos: {goals_period_h.get('peak_conceded','?')}")
+        if goals_period_a:
+            _row(f"Pico gols marcados {a_name[:12]}: {goals_period_a.get('peak_scored','?')}  |  Pico sofridos: {goals_period_a.get('peak_conceded','?')}")
+
+    _render_period_table("🚩 ESCANTEIOS POR PERÍODO (a favor/j)", corners_period_h, corners_period_a, "for_team")
+    _render_period_table("🟨 CARTÕES POR PERÍODO (amarelos/j)", cards_period_h, cards_period_a, "yellows")
+
+    # ── DOMINANCE SCORE V5 ───────────────────────────────────────────
+    if dominance_score:
+        _section("🏆 EXPECTED DOMINANCE SCORE")
+        ds = dominance_score.get("score", 50)
+        ds_label = dominance_score.get("label", "?")
+        bar_d = _render_bar(int(ds), 100, 30)
+        _row(f"Score: {ds:.1f}/100  {bar_d}")
+        _row(f"Diagnóstico: {ds_label}")
+        _row(f"  (ELO + xG + PPDA + Field Tilt + Forma + Clima + Fadiga)")
+
+    # ── CENÁRIOS V5 ──────────────────────────────────────────────────
+    if scenarios:
+        _section("🎬 CENÁRIOS PROBABILÍSTICOS")
+        for sc in scenarios:
+            _row(f"{'★' * sc['id']}  [{sc['prob']*100:.0f}%]  {sc['title']}")
+            _row(f"   Gols esperados: {sc['goals']}")
+            _row(f"   {sc['desc'][:65]}")
+            for k in sc.get("keys", []):
+                _row(f"   • {k[:60]}")
+            _sep()
+
+    # ── NARRATIVA V5 ─────────────────────────────────────────────────
+    if narrative:
+        _section("📖 NARRATIVA DA PARTIDA")
+        words = narrative.split()
+        line = ""
+        for word in words:
+            if len(line) + len(word) + 1 > 64:
+                _row(line)
+                line = word
+            else:
+                line = (line + " " + word).strip()
+        if line:
+            _row(line)
+
+    # ── PREDICTION CONFIDENCE INDEX V5 ───────────────────────────────
+    if prediction_confidence:
+        _section(f"🔬 ÍNDICE DE CONFIANÇA DA PREDIÇÃO")
+        pc_score = prediction_confidence.get("score", 50)
+        pc_label = prediction_confidence.get("label", "?")
+        bar_pc = _render_bar(int(pc_score), 100, 25)
+        _row(f"Score: {pc_score:.1f}/100  {bar_pc}  {pc_label}")
+        _sep()
+        for note in (prediction_confidence.get("notes") or []):
+            _row(f"  • {note[:65]}")
+
     print("╚" + "═"*W + "╝")
 
     # ── EV+ REPORT ──────────────────────────────────────────────────
@@ -3781,6 +4936,67 @@ def execute_advanced_pre_live_analysis_v3():
     # EV+ Report (V4)
     ev_report = build_ev_report(ensemble, all_odds, h_name, a_name)
 
+    # ── V5 MODULES ────────────────────────────────────────────────────
+    print("  ▸ V5 — Perfis táticos...")
+    h_tactical = calculate_tactical_profile(h_hist, h_blended, h_id, lineups)
+    a_tactical = calculate_tactical_profile(a_hist, a_blended, a_id, lineups)
+
+    print("  ▸ V5 — Matchup tático...")
+    tactical_matchup_v5 = calculate_tactical_matchup(h_tactical, a_tactical, h_name, a_name)
+
+    print("  ▸ V5 — Fadiga & SOS...")
+    fatigue_h_v5 = calculate_fatigue_index(h_hist, match_datetime)
+    fatigue_a_v5 = calculate_fatigue_index(a_hist, match_datetime)
+    sos_h_v5 = calculate_sos(h_hist, h_id)
+    sos_a_v5 = calculate_sos(a_hist, a_id)
+
+    print("  ▸ V5 — Impacto climático avançado...")
+    climate_impact_v5 = calculate_advanced_climate_impact(weather)
+
+    print("  ▸ V5 — PPDA, Field Tilt, xThreat...")
+    ppda_h_v5 = calculate_ppda(h_hist, h_id)
+    ppda_a_v5 = calculate_ppda(a_hist, a_id)
+    field_tilt_v5 = calculate_field_tilt(h_blended, a_blended)
+    xthreat_v5 = calculate_enhanced_xthreat(h_blended, a_blended)
+
+    print("  ▸ V5 — Ações progressivas & zonas de pressão...")
+    prog_h_v5 = calculate_progressive_actions(h_blended)
+    prog_a_v5 = calculate_progressive_actions(a_blended)
+    zones_h_v5 = calculate_pressure_zones(h_blended)
+    zones_a_v5 = calculate_pressure_zones(a_blended)
+
+    print("  ▸ V5 — Distribuições temporais...")
+    goals_period_h_v5 = calculate_goals_by_period(h_hist, h_id)
+    goals_period_a_v5 = calculate_goals_by_period(a_hist, a_id)
+    corners_period_h_v5 = calculate_corners_by_period(h_hist, h_id)
+    corners_period_a_v5 = calculate_corners_by_period(a_hist, a_id)
+    cards_period_h_v5 = calculate_cards_by_period(h_hist, h_id)
+    cards_period_a_v5 = calculate_cards_by_period(a_hist, a_id)
+
+    print("  ▸ V5 — Dominance Score & Confidence Index...")
+    dominance_score_v5 = calculate_dominance_score(
+        h_elo, a_elo, h_pi, a_pi, ensemble,
+        ppda_h_v5, ppda_a_v5,
+        field_tilt_v5, xthreat_v5,
+        climate_impact_v5, fatigue_h_v5, fatigue_a_v5,
+    )
+    prediction_confidence_v5 = calculate_prediction_confidence_index(
+        h_hist, a_hist, ensemble, conf,
+        xthreat_v5, dominance_score_v5, sos_h_v5, sos_a_v5,
+    )
+
+    print("  ▸ V5 — Cenários & Narrativa...")
+    scenarios_v5 = generate_scenarios(
+        ensemble, mc, tactical_matchup_v5,
+        climate_impact_v5, fatigue_h_v5, fatigue_a_v5,
+        h_name, a_name,
+    )
+    narrative_v5 = generate_narrative(
+        scenarios_v5, h_name, a_name,
+        tactical_matchup_v5, climate_impact_v5,
+        fatigue_h_v5, fatigue_a_v5, ensemble,
+    )
+
     # False pressure for home/away (default snap-less — use blended stats proxy)
     _fp_snap_h = {
         "h_dangerous": h_blended.get("avg_dangerous_attacks", 0) if h_blended else 0,
@@ -3838,6 +5054,24 @@ def execute_advanced_pre_live_analysis_v3():
         league_name=league_name,
         ev_report=ev_report,
         recommendations=recommendations,
+        # V5 new modules
+        h_tactical=h_tactical, a_tactical=a_tactical,
+        tactical_matchup=tactical_matchup_v5,
+        scenarios=scenarios_v5,
+        narrative=narrative_v5,
+        climate_impact=climate_impact_v5,
+        fatigue_h=fatigue_h_v5, fatigue_a=fatigue_a_v5,
+        sos_h=sos_h_v5, sos_a=sos_a_v5,
+        ppda_h=ppda_h_v5, ppda_a=ppda_a_v5,
+        field_tilt=field_tilt_v5,
+        xthreat=xthreat_v5,
+        prog_h=prog_h_v5, prog_a=prog_a_v5,
+        zones_h=zones_h_v5, zones_a=zones_a_v5,
+        goals_period_h=goals_period_h_v5, goals_period_a=goals_period_a_v5,
+        corners_period_h=corners_period_h_v5, corners_period_a=corners_period_a_v5,
+        cards_period_h=cards_period_h_v5, cards_period_a=cards_period_a_v5,
+        dominance_score=dominance_score_v5,
+        prediction_confidence=prediction_confidence_v5,
     )
 
     input("\nPressione ENTER para retornar ao menu da partida...")
