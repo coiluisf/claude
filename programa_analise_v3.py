@@ -5501,8 +5501,11 @@ def calculate_global_confidence(ensemble_conf, data_quality, placeholder_detecto
     components["consistencia_modelos"] = round(cons_pts, 1)
 
     # Lineups confirmed (15 pts)
-    if lineups and (lineups.get("home") or lineups.get("away") or
-                    (isinstance(lineups, list) and len(lineups) > 0)):
+    _lineups_ok = bool(lineups and (
+        (isinstance(lineups, list) and len(lineups) > 0) or
+        (isinstance(lineups, dict) and (lineups.get("home") or lineups.get("away")))
+    ))
+    if _lineups_ok:
         score += 15.0
         components["escalacoes"] = 15.0
     else:
