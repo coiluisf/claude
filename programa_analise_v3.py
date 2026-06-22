@@ -7939,7 +7939,13 @@ def _render_dashboard(snap, hist, h_name, a_name, home_id,
                        poll_count, next_poll_in, consciousness=None,
                        live_fair=None, regime=None,
                        false_pressure_h=None, false_pressure_a=None,
-                       live_events=None):
+                       live_events=None,
+                       v5_momentum=None, v5_press_h=None, v5_press_a=None,
+                       v5_gii=None, v5_anti_h=None, v5_anti_a=None,
+                       v5_cashout=None, v5_corn_h=None, v5_corn_a=None,
+                       v5_tactical=None, v5_fatigue=None, v5_xgm=None,
+                       v5_red=None, v5_game_state=None, v5_win_prob=None,
+                       v5_trader=None, v5_alerts=None):
     """Renderiza o painel de trading ao vivo — layout limpo e actionable."""
     _clear()
 
@@ -8099,13 +8105,138 @@ def _render_dashboard(snap, hist, h_name, a_name, home_id,
                     urg_icon = "🔴" if c["urgency"] == "crítica" else "🟠"
                     print(f"║  {urg_icon} {c['msg'][:W-5]}".ljust(W+1) + "║")
 
-    # ── MOMENTUM ─────────────────────────────────────────────────────
+    # ── V5: ALERTAS PROFISSIONAIS ─────────────────────────────────────
+    if v5_alerts:
+        top_alerts = [a for a in v5_alerts if a["priority"] <= 2][:5]
+        if top_alerts:
+            print("╠" + "═"*W + "╣")
+            print(f"║  🔔 ALERTAS".ljust(W+1) + "║")
+            print("║" + "─"*W + "║")
+            for al in top_alerts:
+                metrics_str = "  ".join(al.get("metrics", []))[:20]
+                print(f"║  {al['icon']} {al['title']:<30} conf:{al['confidence']:>3}%  {metrics_str}".ljust(W+1) + "║")
+                print(f"║     ↳ {al['reason'][:W-6]}".ljust(W+1) + "║")
+
+    # ── V5: WIN PROBABILITY LIVE ──────────────────────────────────────
+    if v5_win_prob:
+        hw = v5_win_prob["h_win"]; dr = v5_win_prob["draw"]; aw = v5_win_prob["a_win"]
+        bh = _render_bar(int(hw*100), 100, 8); bd = _render_bar(int(dr*100), 100, 8)
+        ba = _render_bar(int(aw*100), 100, 8)
+        print("╠" + "═"*W + "╣")
+        print(f"║  🎲 WIN PROB LIVE   Casa: {hw*100:.1f}% {bh}  Emp: {dr*100:.1f}% {bd}  Fora: {aw*100:.1f}% {ba}".ljust(W+1) + "║")
+
+    # ── V5: GAME STATE ────────────────────────────────────────────────
+    if v5_game_state:
+        print("╠" + "═"*W + "╣")
+        print(f"║  🎮 GAME STATE   {v5_game_state['h_icon']} {h_name[:16]}: {v5_game_state['h_state']:<22}  "
+              f"{v5_game_state['a_icon']} {a_name[:16]}: {v5_game_state['a_state']}".ljust(W+1) + "║")
+
+    # ── V5: LIVE MOMENTUM ─────────────────────────────────────────────
+    if v5_momentum:
+        hs = v5_momentum["h_score"]; as_ = v5_momentum["a_score"]
+        bh = _render_bar(int(hs), 100, 8); ba = _render_bar(int(as_), 100, 8)
+        print("╠" + "═"*W + "╣")
+        print(f"║  📈 MOMENTUM   {h_name[:14]}: {hs:>5.1f} {bh} {v5_momentum['h_label']:<12}  "
+              f"{a_name[:14]}: {as_:>5.1f} {ba} {v5_momentum['a_label']}".ljust(W+1) + "║")
+        print(f"║     {v5_momentum['diagnosis'][:W-5]}".ljust(W+1) + "║")
+
+    # ── V5: GOAL IMMINENT INDEX ───────────────────────────────────────
+    if v5_gii:
+        hg = v5_gii["h_gii"]; ag = v5_gii["a_gii"]
+        bh = _render_bar(int(hg), 100, 8); ba = _render_bar(int(ag), 100, 8)
+        ah = "  🚨 GOL IMINENTE!" if v5_gii["alert_h"] else ""
+        aa = "  🚨 GOL IMINENTE!" if v5_gii["alert_a"] else ""
+        print("╠" + "═"*W + "╣")
+        print(f"║  🎯 GOAL INDEX   {h_name[:14]}: {hg:>5.1f} {bh}{ah}".ljust(W+1) + "║")
+        print(f"║                  {a_name[:14]}: {ag:>5.1f} {ba}{aa}".ljust(W+1) + "║")
+
+    # ── V5: PRESSÃO ACUMULADA ─────────────────────────────────────────
+    if v5_press_h and v5_press_a:
+        print("╠" + "═"*W + "╣")
+        print(f"║  🌊 PRESSÃO   {'CASA':>5}  /  {'FORA':>5}         1m    3m    5m   10m".ljust(W+1) + "║")
+        print(f"║  {h_name[:14]:<14}: P1={v5_press_h['p1']:>5.1f}  P3={v5_press_h['p3']:>5.1f}  "
+              f"P5={v5_press_h['p5']:>5.1f}  P10={v5_press_h['p10']:>5.1f}  [{v5_press_h['level']}]{'  ⚡SUSTENTADA' if v5_press_h['sustained_alert'] else ''}".ljust(W+1) + "║")
+        print(f"║  {a_name[:14]:<14}: P1={v5_press_a['p1']:>5.1f}  P3={v5_press_a['p3']:>5.1f}  "
+              f"P5={v5_press_a['p5']:>5.1f}  P10={v5_press_a['p10']:>5.1f}  [{v5_press_a['level']}]{'  ⚡SUSTENTADA' if v5_press_a['sustained_alert'] else ''}".ljust(W+1) + "║")
+
+    # ── V5: xG MOMENTUM ──────────────────────────────────────────────
+    if v5_xgm:
+        hxm = v5_xgm.get("home", {}); axm = v5_xgm.get("away", {})
+        print("╠" + "═"*W + "╣")
+        print(f"║  ⚡ xG MOMENTUM   {h_name[:14]}: {hxm.get('icon','')} {hxm.get('trend','?')}  "
+              f"(jogo={hxm.get('xg_game',0):.2f}  5c={hxm.get('xg5',0):.3f}  10c={hxm.get('xg10',0):.3f})".ljust(W+1) + "║")
+        print(f"║                   {a_name[:14]}: {axm.get('icon','')} {axm.get('trend','?')}  "
+              f"(jogo={axm.get('xg_game',0):.2f}  5c={axm.get('xg5',0):.3f}  10c={axm.get('xg10',0):.3f})".ljust(W+1) + "║")
+
+    # ── V5: ESCANTEIO IMINENTE ────────────────────────────────────────
+    if v5_corn_h is not None and v5_corn_a is not None:
+        none_prob = max(0.0, 1.0 - v5_corn_h - v5_corn_a)
+        print("╠" + "═"*W + "╣")
+        print(f"║  🚩 ESCANTEIO ~5min   Casa: {v5_corn_h*100:.0f}%  "
+              f"Fora: {v5_corn_a*100:.0f}%  Nenhum: {none_prob*100:.0f}%".ljust(W+1) + "║")
+
+    # ── V5: ANTI-FALSO OVER ───────────────────────────────────────────
+    if v5_anti_h and v5_anti_a:
+        show_h = v5_anti_h["sterile"] or v5_anti_a["sterile"]
+        if show_h:
+            print("╠" + "═"*W + "╣")
+        for aov, nm in [(v5_anti_h, h_name), (v5_anti_a, a_name)]:
+            if aov.get("sterile") or aov.get("efficient"):
+                print(f"║  {aov['icon']} {aov['type']} — {nm[:14]}  "
+                      f"Posse={aov['possession']:.0f}%  Chutes={aov['shots']}  xG={aov['xg']:.2f}".ljust(W+1) + "║")
+                print(f"║     ↳ {aov['recommendation'][:W-6]}".ljust(W+1) + "║")
+
+    # ── V5: FADIGA AO VIVO ────────────────────────────────────────────
+    if v5_fatigue and (v5_fatigue["h_score"] >= 50 or v5_fatigue["a_score"] >= 50):
+        print("╠" + "═"*W + "╣")
+        print(f"║  😓 FADIGA   {h_name[:14]}: {v5_fatigue['h_score']:.0f}/100 [{v5_fatigue['h_label']}]  "
+              f"{a_name[:14]}: {v5_fatigue['a_score']:.0f}/100 [{v5_fatigue['a_label']}]".ljust(W+1) + "║")
+
+    # ── V5: RED CARD IMPACT ───────────────────────────────────────────
+    if v5_red and v5_red.get("detected"):
+        print("╠" + "═"*W + "╣")
+        print(f"║  🔴 VERMELHO — {v5_red['team']}".ljust(W+1) + "║")
+        print(f"║     Ataque: {v5_red['attack_pct']:+.0f}%  Defesa: {v5_red['defense_pct']:+.0f}%  "
+              f"Over adj: ×{v5_red['over_adj']:.2f}  BTTS adj: ×{v5_red['btts_adj']:.2f}".ljust(W+1) + "║")
+
+    # ── V5: MUDANÇA TÁTICA ────────────────────────────────────────────
+    if v5_tactical and v5_tactical.get("detected"):
+        print("╠" + "═"*W + "╣")
+        print(f"║  🔄 MUDANÇA TÁTICA: {v5_tactical['description'][:W-20]}".ljust(W+1) + "║")
+        for side, ch in v5_tactical.get("changes", {}).items():
+            nm = h_name if side == "home" else a_name
+            print(f"║     {nm[:16]}: {ch['type']}  Δposs={ch['delta_poss']:+.1f}  Δatt={ch['delta_att']:+.1f}  "
+                  f"Off: {ch['off_impact']:+d}%  Def: {ch['def_impact']:+d}%".ljust(W+1) + "║")
+
+    # ── V5: SMART CASHOUT ─────────────────────────────────────────────
+    if v5_cashout:
+        ca = v5_cashout["action"]
+        if ca != "MANTER POSIÇÃO" or True:  # sempre mostra
+            print("╠" + "═"*W + "╣")
+            print(f"║  {v5_cashout['icon']} CASHOUT: {ca}   ({v5_cashout['remaining']}min restantes)".ljust(W+1) + "║")
+            print(f"║     ↳ {v5_cashout['reason'][:W-6]}".ljust(W+1) + "║")
+
+    # ── V5: TRADER ASSISTANT ─────────────────────────────────────────
+    if v5_trader:
+        conf = v5_trader["confidence"]
+        conf_bar = _render_bar(conf, 100, 10)
+        print("╠" + "═"*W + "╣")
+        print(f"║  🤖 TRADER ASSISTANT — {v5_trader['minute']}'".ljust(W+1) + "║")
+        print(f"║  {v5_trader['narrative'][:W-2]}".ljust(W+1) + "║")
+        print("║" + "─"*W + "║")
+        rec_icon = "🟢" if conf >= 70 else ("🟡" if conf >= 50 else "🔴")
+        print(f"║  {rec_icon} Recomendação: {v5_trader['recommendation']:<30}  Confiança: {conf}% {conf_bar}".ljust(W+1) + "║")
+        if v5_trader["motivos"]:
+            motivos_str = "  |  ".join(v5_trader["motivos"][:3])
+            print(f"║     ↳ {motivos_str[:W-6]}".ljust(W+1) + "║")
+
+    # ── MOMENTUM (consciência existente — mantido) ─────────────────────
     if consciousness and consciousness.get("momentum", {}).get("status") == "ok":
         mom = consciousness["momentum"]
         print("╠" + "═"*W + "╣")
         dom = mom.get("dominant")
         dom_txt = f"  ▶ Dominante: {dom}" if dom else "  Equilíbrio"
-        print(f"║  📈 MOMENTUM{dom_txt}".ljust(W+1) + "║")
+        print(f"║  📊 MOMENTUM (UPI){dom_txt}".ljust(W+1) + "║")
         print(f"║  {h_name[:20]:<20}: {mom['h_label'][:46]}".ljust(W+1) + "║")
         print(f"║  {a_name[:20]:<20}: {mom['a_label'][:46]}".ljust(W+1) + "║")
 
@@ -8141,7 +8272,7 @@ def _render_dashboard(snap, hist, h_name, a_name, home_id,
                 fp_shown = True
             print(f"║  ⚠ PRESSÃO FALSA — {name[:18]}  ({fp['reason'][:W-26]})".ljust(W+1) + "║")
 
-    # ── FADIGA ────────────────────────────────────────────────────────
+    # ── FADIGA (consciência existente — mantido) ───────────────────────
     if consciousness and consciousness.get("fatigue"):
         for fat in consciousness["fatigue"][:2]:
             if not fp_shown:
@@ -8250,13 +8381,48 @@ def live_trading_dashboard(fixture_id, h_name, a_name, home_id):
             except Exception:
                 _live_events = None
 
+            # V5 — 16 módulos profissionais
+            try:
+                _v5_mom   = _live_momentum_engine(snap, history)
+                _v5_ph    = _pressure_windows(snap, history, "h_")
+                _v5_pa    = _pressure_windows(snap, history, "a_")
+                _v5_gii   = _goal_imminent_index(snap, history,
+                                _v5_mom["h_score"], _v5_mom["a_score"], _v5_ph, _v5_pa)
+                _v5_aoh   = _anti_false_over(snap, "h_")
+                _v5_aoa   = _anti_false_over(snap, "a_")
+                _v5_cash  = _smart_cashout(snap, history,
+                                _v5_gii["h_gii"], _v5_gii["a_gii"], _v5_mom)
+                _v5_corn_h = _corner_imminent_prob(snap, history, "h_")
+                _v5_corn_a = _corner_imminent_prob(snap, history, "a_")
+                _v5_tact  = _tactical_change_detector(snap, history)
+                _v5_fat   = _fatigue_live(snap, snap["minute"])
+                _v5_xgm   = _xg_momentum_live(snap, history)
+                _v5_red   = _red_card_impact(snap, history)
+                _v5_gs    = _game_state_engine(snap, h_name, a_name)
+                _v5_wp    = _win_prob_live(snap, history, h_name, a_name)
+                _v5_ta    = _trader_assistant(snap, h_name, a_name, _v5_mom, _v5_gii,
+                                _v5_ph, _v5_pa, _v5_xgm, _v5_gs, snap["minute"])
+                _v5_alrt  = _professional_alerts(_v5_gii, _v5_mom, _v5_ph, _v5_pa,
+                                _v5_aoh, _v5_aoa, _v5_red, _v5_tact, _v5_cash, snap)
+            except Exception:
+                _v5_mom = _v5_ph = _v5_pa = _v5_gii = _v5_aoh = _v5_aoa = None
+                _v5_cash = _v5_corn_h = _v5_corn_a = _v5_tact = _v5_fat = None
+                _v5_xgm = _v5_red = _v5_gs = _v5_wp = _v5_ta = _v5_alrt = None
+
             # Renderiza painel
             _render_dashboard(snap, history, h_name, a_name, home_id,
                               goal_sigs, corner_sigs, card_sigs,
                               poll_count, POLL_INTERVAL, consciousness,
                               live_fair=_live_fair, regime=_regime,
                               false_pressure_h=_fp_h, false_pressure_a=_fp_a,
-                              live_events=_live_events)
+                              live_events=_live_events,
+                              v5_momentum=_v5_mom, v5_press_h=_v5_ph, v5_press_a=_v5_pa,
+                              v5_gii=_v5_gii, v5_anti_h=_v5_aoh, v5_anti_a=_v5_aoa,
+                              v5_cashout=_v5_cash, v5_corn_h=_v5_corn_h, v5_corn_a=_v5_corn_a,
+                              v5_tactical=_v5_tact, v5_fatigue=_v5_fat, v5_xgm=_v5_xgm,
+                              v5_red=_v5_red, v5_game_state=_v5_gs, v5_win_prob=_v5_wp,
+                              v5_trader=_v5_ta, v5_alerts=_v5_alrt,
+                              h_name=h_name, a_name=a_name)
 
             # Mantém histórico limitado
             history.append(snap)
@@ -8607,12 +8773,376 @@ def _print_signal_log(signal_log):
         icon = {"GOL": "⚽", "ESCANTEIO": "🚩", "CARTÃO": "🟨"}.get(entry.get("type", ""), "•")
         print(f"  {icon} {entry.get('minute', '?'):>3}' | {entry.get('type','?'):<12} | "
               f"{entry.get('team','?'):<18} | {entry.get('strength','')}")
-    # Resumo por tipo
     from collections import Counter
     tipos = Counter(e.get("type", "?") for e in signal_log)
     print(f"{'─'*60}")
     print(f"  Resumo: " + "  |  ".join(f"{t}: {n}" for t, n in tipos.most_common()))
     print(f"{'='*60}")
+
+
+# =====================================================================
+# LIVE TRADING V2 — 16 MÓDULOS PROFISSIONAIS
+# =====================================================================
+
+def _live_momentum_engine(snap, history):
+    """M1 — Live Momentum Score 0-100 por time usando janelas 1/3/5/10 ciclos."""
+    def _window_score(snaps, prefix):
+        if not snaps: return 0.0
+        total = sum(
+            s.get(f"{prefix}dangerous", 0) * 3
+            + s.get(f"{prefix}sot", 0) * 4
+            + s.get(f"{prefix}shots", 0) * 2
+            + s.get(f"{prefix}corners", 0) * 1.5
+            + s.get(f"{prefix}attacks", 0) * 0.5
+            + s.get(f"{prefix}passes_acc", 0) * 0.05
+            for s in snaps
+        )
+        return total / len(snaps)
+
+    all_snaps = history + [snap]
+    def _score(prefix):
+        w1  = _window_score(all_snaps[-2:],  prefix)
+        w3  = _window_score(all_snaps[-6:],  prefix)
+        w5  = _window_score(all_snaps[-10:], prefix)
+        w10 = _window_score(all_snaps,       prefix)
+        raw = w1 * 0.35 + w3 * 0.30 + w5 * 0.20 + w10 * 0.15
+        return round(min(100.0, raw * 2.5), 1)
+
+    def _lbl(s):
+        if s >= 81: return "Dominante"
+        if s >= 61: return "Forte"
+        if s >= 41: return "Moderado"
+        if s >= 21: return "Fraco"
+        return "Inativo"
+
+    h = _score("h_"); a = _score("a_")
+    if h > a * 1.4:   diag = "Mandante domina os últimos ciclos."
+    elif a > h * 1.4: diag = "Visitante domina os últimos ciclos."
+    else:             diag = "Jogo equilibrado em intensidade."
+
+    return {"h_score": h, "a_score": a, "h_label": _lbl(h), "a_label": _lbl(a),
+            "diagnosis": diag,
+            "dominant": "home" if h > a * 1.3 else ("away" if a > h * 1.3 else None)}
+
+
+def _pressure_windows(snap, history, prefix):
+    """M2 — Pressão por janelas 1/3/5/10 ciclos. Retorna nível e alerta sustentado."""
+    all_snaps = history + [snap]
+    def _p(snaps):
+        if not snaps: return 0.0
+        total = sum(
+            s.get(f"{prefix}dangerous", 0) * 4
+            + s.get(f"{prefix}sot", 0) * 5
+            + s.get(f"{prefix}shots", 0) * 2
+            + s.get(f"{prefix}corners", 0) * 2
+            + s.get(f"{prefix}attacks", 0) * 0.8
+            for s in snaps
+        )
+        return round(min(100.0, total / len(snaps) * 3), 1)
+    p1  = _p(all_snaps[-2:])
+    p3  = _p(all_snaps[-6:])
+    p5  = _p(all_snaps[-10:])
+    p10 = _p(all_snaps)
+    sustained = p1 >= 60 and p3 >= 55 and p5 >= 50
+    level = "Crítica" if p5 >= 75 else "Alta" if p5 >= 50 else "Moderada" if p5 >= 25 else "Baixa"
+    return {"p1": p1, "p3": p3, "p5": p5, "p10": p10, "level": level, "sustained_alert": sustained}
+
+
+def _goal_imminent_index(snap, history, h_mom, a_mom, press_h, press_a):
+    """M3 — Goal Imminent Index 0-100 por time combinando momentum, xG, pressão."""
+    minute = max(snap.get("minute", 1), 1)
+    def _gii(mom, press, prefix):
+        xg_acc   = snap.get(f"{prefix}sot", 0) / 4.5
+        sot_pace = snap.get(f"{prefix}sot", 0) / minute * 90
+        wood     = snap.get(f"{prefix}woodwork", 0)
+        raw = (mom * 0.30 + press.get("p5", 0) * 0.25
+               + min(100, xg_acc * 15) * 0.20
+               + min(100, sot_pace * 5) * 0.15
+               + min(100, snap.get(f"{prefix}dangerous", 0) * 3) * 0.07
+               + wood * 8 * 0.03)
+        return round(min(100.0, raw), 1)
+    h = _gii(h_mom, press_h, "h_"); a = _gii(a_mom, press_a, "a_")
+    def _lbl(v):
+        if v >= 81: return "Muito Alto"
+        if v >= 61: return "Alto"
+        if v >= 41: return "Médio"
+        return "Baixo"
+    return {"h_gii": h, "a_gii": a, "h_label": _lbl(h), "a_label": _lbl(a),
+            "alert_h": h >= 75, "alert_a": a >= 75}
+
+
+def _anti_false_over(snap, prefix):
+    """M4 — Detecta pressão estéril: alta posse/ataques mas baixo xG/chutes."""
+    poss   = snap.get(f"{prefix}possession", 50) or 50
+    att    = snap.get(f"{prefix}attacks", 0)
+    shots  = snap.get(f"{prefix}shots", 0)
+    sot    = snap.get(f"{prefix}sot", 0)
+    xg     = round(sot / 4.5, 3)
+    ratio  = shots / max(att, 1)
+    sterile   = poss >= 60 and att >= 15 and shots <= 3 and xg <= 0.30
+    efficient = ratio >= 0.15 and xg >= 0.50
+    if sterile:
+        return {"type": "Pressão Estéril", "icon": "🔴", "sterile": True, "efficient": False,
+                "recommendation": "Evitar entrada em Over.",
+                "possession": poss, "attacks": att, "shots": shots, "xg": xg}
+    if efficient:
+        return {"type": "Pressão Eficiente", "icon": "🟢", "sterile": False, "efficient": True,
+                "recommendation": "Pressão com qualidade — Over favorável.",
+                "possession": poss, "attacks": att, "shots": shots, "xg": xg}
+    return {"type": "Pressão Neutra", "icon": "🟡", "sterile": False, "efficient": False,
+            "recommendation": "Aguardar evolução.",
+            "possession": poss, "attacks": att, "shots": shots, "xg": xg}
+
+
+def _smart_cashout(snap, history, gii_h, gii_a, momentum_result):
+    """M5 — Recomendação de cashout baseada em EV, momentum, game state, tempo."""
+    minute    = snap.get("minute", 0)
+    remaining = max(90 - minute, 0)
+    diff      = snap.get("score_h", 0) - snap.get("score_a", 0)
+    dom       = momentum_result.get("dominant") if momentum_result else None
+    max_gii   = max(gii_h or 0, gii_a or 0)
+
+    if remaining <= 10 and diff == 0:
+        action, reason, icon = "CASHOUT TOTAL",   "Empate + últimos 10min — proteger lucro.", "🔴"
+    elif max_gii >= 80 and remaining >= 15:
+        action, reason, icon = "MANTER POSIÇÃO",  "GII muito alto — gol iminente, posição favorável.", "🟢"
+    elif dom is None and remaining <= 20:
+        action, reason, icon = "CASHOUT PARCIAL", "Equilíbrio + pouco tempo — reduzir risco.", "🟡"
+    else:
+        action, reason, icon = "MANTER POSIÇÃO",  "Situação favorável — manter.", "🟢"
+    return {"action": action, "reason": reason, "icon": icon, "remaining": remaining, "diff": diff}
+
+
+def _corner_imminent_prob(snap, history, prefix):
+    """M6 — Probabilidade de próximo escanteio nos ~5 min para o time."""
+    import math as _math
+    minute      = max(snap.get("minute", 1), 1)
+    corners     = snap.get(f"{prefix}corners", 0)
+    blocked     = snap.get(f"{prefix}blocked", 0)
+    all_snaps   = history + [snap]
+    d_blocked = d_corners = 0
+    if len(all_snaps) >= 2:
+        prev = all_snaps[-2]
+        d_blocked = max(0, snap.get(f"{prefix}blocked",0) - prev.get(f"{prefix}blocked",0))
+        d_corners = max(0, snap.get(f"{prefix}corners",0) - prev.get(f"{prefix}corners",0))
+    lam = (corners / minute) * 5 + d_blocked * 0.4 + d_corners * 0.3
+    return round(min(0.95, 1 - _math.exp(-max(lam, 0))), 2)
+
+
+def _tactical_change_detector(snap, history):
+    """M7 — Detecta mudança tática por variação de padrão entre janelas."""
+    if len(history) < 4:
+        return {"detected": False, "changes": {}, "description": ""}
+    def _prof(snaps, prefix):
+        n = len(snaps)
+        return (sum(s.get(f"{prefix}possession", 50) or 50 for s in snaps) / n,
+                sum(s.get(f"{prefix}attacks", 0) for s in snaps) / n,
+                sum(s.get(f"{prefix}shots",   0) for s in snaps) / n)
+    mid = len(history) // 2
+    early = history[:mid]; late = history[mid:] + [snap]
+    changes = {}
+    for prefix, side in [("h_", "home"), ("a_", "away")]:
+        ep, ea, es = _prof(early, prefix)
+        lp, la, ls = _prof(late,  prefix)
+        dp, da, ds = lp - ep, la - ea, ls - es
+        if abs(dp) >= 10 or abs(da) >= 5:
+            typ = ("Mais Ofensivo" if (da > 5 or ds > 2) else
+                   "Mais Defensivo" if (da < -5 or dp < -10) else "Ajuste Tático")
+            changes[side] = {"type": typ, "delta_poss": round(dp,1), "delta_att": round(da,1),
+                             "off_impact": +15 if da > 5 else (-15 if da < -5 else 0),
+                             "def_impact": +10 if da > 5 else (-10 if da < -5 else 0)}
+    detected = bool(changes)
+    desc = "; ".join(f"{'Casa' if k=='home' else 'Fora'}: {v['type']}" for k,v in changes.items())
+    return {"detected": detected, "changes": changes, "description": desc}
+
+
+def _fatigue_live(snap, minute, weather_temp=None):
+    """M8 — Fadiga ao vivo 0-100 por time baseada em minuto, intensidade e clima."""
+    def _fat(prefix):
+        base  = min(60.0, minute * 0.65)
+        intens = (snap.get(f"{prefix}shots", 0) * 2
+                  + snap.get(f"{prefix}dangerous", 0) * 1.5
+                  + snap.get(f"{prefix}fouls", 0) * 0.5) / max(minute / 10, 1)
+        temp  = max(0.0, (float(weather_temp or 20) - 25) * 0.5)
+        return round(min(100.0, base + intens + temp), 1)
+    h = _fat("h_"); a = _fat("a_")
+    def _lbl(v):
+        return "Crítica" if v >= 75 else "Alta" if v >= 50 else "Moderada" if v >= 25 else "Leve"
+    return {"h_score": h, "a_score": a, "h_label": _lbl(h), "a_label": _lbl(a)}
+
+
+def _xg_momentum_live(snap, history):
+    """M9 — xG Momentum: tendência nas janelas 5/10/15 ciclos."""
+    all_snaps = history + [snap]
+    def _delta_xg(snaps, prefix):
+        if len(snaps) < 2: return 0.0
+        return max(0.0, (snaps[-1].get(f"{prefix}sot", 0) - snaps[0].get(f"{prefix}sot", 0)) / 4.5)
+    def _trend(xg5, xg10, xg15):
+        if xg5 >= xg10 * 0.45 and xg10 >= xg15 * 0.35: return "Acelerando",  "↑↑"
+        if xg5 <= 0.01 and xg10 <= 0.02:               return "Estagnado",   "—"
+        if xg5 < xg10 * 0.25:                           return "Desacelerando","↓↓"
+        return "Estável", "→"
+    result = {}
+    for prefix, side in [("h_", "home"), ("a_", "away")]:
+        xg_game = round(snap.get(f"{prefix}sot", 0) / 4.5, 3)
+        xg5  = _delta_xg(all_snaps[-10:], prefix)
+        xg10 = _delta_xg(all_snaps[-20:], prefix)
+        xg15 = _delta_xg(all_snaps[-30:], prefix)
+        trend, icon = _trend(xg5, xg10, xg15)
+        result[side] = {"xg_game": xg_game, "xg5": round(xg5,3), "xg10": round(xg10,3),
+                        "xg15": round(xg15,3), "trend": trend, "icon": icon}
+    return result
+
+
+def _red_card_impact(snap, history):
+    """M11 — Detecta vermelho novo e recalcula impacto em λ/BTTS/Over."""
+    ph = history[-1].get("h_red", 0) if history else 0
+    pa = history[-1].get("a_red", 0) if history else 0
+    nh = max(0, snap.get("h_red", 0) - ph)
+    na = max(0, snap.get("a_red", 0) - pa)
+    if nh == 0 and na == 0: return {"detected": False}
+    team_parts = []
+    if nh: team_parts.append(f"Casa ({nh}x)")
+    if na: team_parts.append(f"Fora ({na}x)")
+    return {
+        "detected": True, "team": " / ".join(team_parts),
+        "new_h": nh, "new_a": na,
+        "lambda_adj_h": round(1.0 - nh * 0.22, 3),
+        "lambda_adj_a": round(1.0 - na * 0.22, 3),
+        "over_adj":     round(1.0 - (nh + na) * 0.13, 3),
+        "btts_adj":     round(1.0 - (nh + na) * 0.16, 3),
+        "attack_pct":   round(-(nh + na) * 22, 1),
+        "defense_pct":  round(-(nh + na) * 13, 1),
+    }
+
+
+def _game_state_engine(snap, h_name, a_name):
+    """M12 — Identifica contexto tático de cada time (Controlando/Desesperado/etc)."""
+    sh = snap.get("score_h", 0); sa = snap.get("score_a", 0)
+    min_ = snap.get("minute", 0); diff = sh - sa
+    hd = snap.get("h_dangerous", 0); ad = snap.get("a_dangerous", 0)
+    def _st(is_home):
+        d = diff if is_home else -diff
+        att = hd if is_home else ad
+        if d == 0 and min_ >= 75:    return "Pressão Máxima",      "🔥"
+        if d > 0  and att < 5:       return "Controlando Resultado","🛡"
+        if d > 0  and att >= 5:      return "Administrando Posse",  "⚙"
+        if d < 0  and min_ >= 60:    return "Desesperado",          "⚡"
+        if d < 0:                    return "Precisando Vencer",    "⚠"
+        return "Em Transição", "↔"
+    hs, hi = _st(True); as_, ai = _st(False)
+    return {"h_state": hs, "h_icon": hi, "a_state": as_, "a_icon": ai}
+
+
+def _win_prob_live(snap, history, h_name, a_name):
+    """M15 — Probabilidades vitória/empate/derrota dinâmicas por minuto."""
+    import math as _math
+    sh = snap.get("score_h", 0); sa = snap.get("score_a", 0)
+    minute = max(snap.get("minute", 1), 1); rem = max(90 - minute, 0)
+    base_lam = 2.6 * (rem / 90)
+    xg_h = snap.get("h_sot", 0) / 4.5; xg_a = snap.get("a_sot", 0) / 4.5
+    ratio = xg_h / max(xg_h + xg_a, 0.01)
+    lh = base_lam * ratio; la = base_lam * (1 - ratio)
+    def _pois(lam, k):
+        return _math.exp(-lam) * (lam ** k) / _math.factorial(k)
+    h_win = draw = a_win = 0.0
+    for hg in range(8):
+        for ag in range(8):
+            p = _pois(lh, hg) * _pois(la, ag)
+            fh = sh + hg; fa = sa + ag
+            if fh > fa: h_win += p
+            elif fh == fa: draw += p
+            else: a_win += p
+    tot = h_win + draw + a_win
+    if tot > 0: h_win /= tot; draw /= tot; a_win /= tot
+    return {"h_win": round(h_win, 3), "draw": round(draw, 3), "a_win": round(a_win, 3)}
+
+
+def _trader_assistant(snap, h_name, a_name, momentum, gii, press_h, press_a,
+                      xg_mom, game_state, minute):
+    """M13 — Narrativa analítica + recomendação EV com motivos e confiança."""
+    h_gii = (gii or {}).get("h_gii", 0); a_gii = (gii or {}).get("a_gii", 0)
+    h_mom = (momentum or {}).get("h_score", 0); a_mom = (momentum or {}).get("a_score", 0)
+    h_state = (game_state or {}).get("h_state", ""); a_state = (game_state or {}).get("a_state", "")
+    sh = snap.get("score_h", 0); sa = snap.get("score_a", 0)
+    total_goals = sh + sa; rem = max(90 - minute, 0)
+    h_trend = (xg_mom or {}).get("home", {}).get("trend", "Estável")
+    a_trend = (xg_mom or {}).get("away", {}).get("trend", "Estável")
+    h_xg5  = (xg_mom or {}).get("home", {}).get("xg5", 0)
+
+    dom = (momentum or {}).get("dominant")
+    dom_name = h_name if dom == "home" else (a_name if dom == "away" else None)
+
+    parts = []
+    if dom_name: parts.append(f"{dom_name[:16]} domina territorialmente.")
+    else:        parts.append("Partida equilibrada em intensidade.")
+    max_gii = max(h_gii, a_gii)
+    gii_name = h_name if h_gii > a_gii else a_name
+    if max_gii >= 65: parts.append(f"GII elevado para {gii_name[:16]} ({max_gii:.0f}/100).")
+    if h_trend == "Acelerando": parts.append(f"xG mandante acelerando ({h_xg5:.2f} últimos 5 ciclos).")
+
+    combined_mom = (h_mom + a_mom) / 2
+    motivos = []; rec = "Aguardar — sem sinal claro"; conf = 35
+
+    if max_gii >= 72 and combined_mom >= 50 and rem >= 10:
+        rec  = f"Back Over {total_goals + 0.5:.1f}"
+        conf = min(90, int(max_gii * 0.80 + combined_mom * 0.10))
+        motivos = [f"GII: {max_gii:.0f}/100", f"Momentum: {combined_mom:.0f}/100",
+                   f"Pressão: {press_h.get('level','?') if h_gii > a_gii else press_a.get('level','?')}"]
+        if h_trend == "Acelerando" or a_trend == "Acelerando": motivos.append("xG crescente")
+    elif h_state in ("Desesperado","Pressão Máxima") or a_state in ("Desesperado","Pressão Máxima"):
+        rec = "Aguardar — instabilidade / jogo aberto"; conf = 45
+        motivos = [f"Game State: {h_state} / {a_state}"]
+    else:
+        motivos = ["Sem convergência de sinais suficientes"]
+
+    return {"narrative": " ".join(parts), "recommendation": rec,
+            "confidence": conf, "motivos": motivos, "minute": minute}
+
+
+def _professional_alerts(gii, momentum, press_h, press_a,
+                          anti_h, anti_a, red_card, tactical, cashout, snap):
+    """M16 — Central de alertas profissionais priorizados por urgência."""
+    alerts = []
+    def _add(icon, title, reason, conf, metrics, prio):
+        alerts.append({"icon": icon, "title": title, "reason": reason,
+                       "confidence": conf, "metrics": metrics, "priority": prio})
+
+    if (gii or {}).get("alert_h"):
+        _add("🟢","Gol Iminente — Casa","Goal Index muito alto",
+             min(95,int(gii["h_gii"])),[f"GII={gii['h_gii']:.0f}"],1)
+    if (gii or {}).get("alert_a"):
+        _add("🟢","Gol Iminente — Fora","Goal Index muito alto",
+             min(95,int(gii["a_gii"])),[f"GII={gii['a_gii']:.0f}"],1)
+    if (red_card or {}).get("detected"):
+        _add("🔴",f"Vermelho — {red_card['team']}","Recalcular mercados",
+             95,[f"Ataque {red_card['attack_pct']:.0f}%"],1)
+    if (press_h or {}).get("sustained_alert"):
+        _add("🟢","Pressão Sustentada — Casa","Todas janelas elevadas",
+             75,[f"P5={press_h['p5']:.0f}"],2)
+    if (press_a or {}).get("sustained_alert"):
+        _add("🟢","Pressão Sustentada — Fora","Todas janelas elevadas",
+             75,[f"P5={press_a['p5']:.0f}"],2)
+    if (anti_h or {}).get("sterile"):
+        _add("🔴","Pressão Estéril — Casa","Alta posse, baixo xG",
+             80,[f"xG={anti_h.get('xg',0):.2f}"],2)
+    if (anti_a or {}).get("sterile"):
+        _add("🔴","Pressão Estéril — Fora","Alta posse, baixo xG",
+             80,[f"xG={anti_a.get('xg',0):.2f}"],2)
+    if (cashout or {}).get("action") in ("CASHOUT TOTAL","CASHOUT PARCIAL"):
+        ic = "🔴" if cashout["action"] == "CASHOUT TOTAL" else "🟡"
+        _add(ic, cashout["action"], cashout["reason"], 70, [], 2)
+    if (tactical or {}).get("detected"):
+        _add("🟡","Mudança Tática",(tactical or {}).get("description",""), 65, [], 3)
+    dom = (momentum or {}).get("dominant")
+    if dom == "home" and (momentum or {}).get("h_score", 0) >= 70:
+        _add("🟢","Domínio do Mandante",(momentum or {}).get("diagnosis",""),
+             int(momentum["h_score"]), [f"Mom={momentum['h_score']:.0f}"], 3)
+    elif dom == "away" and (momentum or {}).get("a_score", 0) >= 70:
+        _add("🟢","Domínio do Visitante",(momentum or {}).get("diagnosis",""),
+             int(momentum["a_score"]), [f"Mom={momentum['a_score']:.0f}"], 3)
+
+    return sorted(alerts, key=lambda x: (x["priority"], -x["confidence"]))
 
 
 # =====================================================================
