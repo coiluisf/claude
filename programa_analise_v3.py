@@ -4566,9 +4566,20 @@ def calculate_lambda_explainer(
     """
     Full component breakdown of how each team's λ was derived.
     Returns two dicts (home, away) with step-by-step contributions.
+    fatigue_h/a may be float (legacy) or dict with 'fatigue_index' key.
     """
     def _safe(v, default=0.0):
         return float(v) if v is not None else default
+
+    def _fatigue_index(fat):
+        """Extract fatigue index whether fat is float, int, or dict."""
+        if fat is None:
+            return 0.0
+        if isinstance(fat, (int, float)):
+            return float(fat)
+        if isinstance(fat, dict):
+            return float(fat.get("fatigue_index") or 0)
+        return 0.0
 
     # Home lambda components
     h_base_off  = _safe(h_blended.get("avg_gf"), 1.2)
@@ -4591,15 +4602,9 @@ def calculate_lambda_explainer(
         cli_coeff = _safe(climate_impact.get("xg_coeff"), 1.0)
         cli_note  = climate_impact.get("summary", "Neutro")
 
-    # Fatigue coefficient
-    h_fat_coeff = 1.0
-    a_fat_coeff = 1.0
-    if fatigue_h:
-        fi = _safe(fatigue_h.get("fatigue_index"), 0)
-        h_fat_coeff = max(0.85, 1.0 - fi * 0.002)
-    if fatigue_a:
-        fi = _safe(fatigue_a.get("fatigue_index"), 0)
-        a_fat_coeff = max(0.85, 1.0 - fi * 0.002)
+    # Fatigue coefficient (fatigue may be float or dict)
+    h_fat_coeff = max(0.85, 1.0 - _fatigue_index(fatigue_h) * 0.002)
+    a_fat_coeff = max(0.85, 1.0 - _fatigue_index(fatigue_a) * 0.002)
 
     h_lambda_final = h_lambda_xg * cli_coeff * h_fat_coeff
     a_lambda_final = a_lambda_xg * cli_coeff * a_fat_coeff
@@ -4648,10 +4653,13 @@ def apply_climate_fatigue_to_lambdas(lh, la, climate_impact=None,
 
     cli = _safe(climate_impact.get("xg_coeff"), 1.0) if climate_impact else 1.0
 
-    h_fi = _safe((fatigue_h or {}).get("fatigue_index"), 0)
-    a_fi = _safe((fatigue_a or {}).get("fatigue_index"), 0)
-    h_fat = max(0.85, 1.0 - h_fi * 0.002)
-    a_fat = max(0.85, 1.0 - a_fi * 0.002)
+    def _fi(fat):
+        if fat is None: return 0.0
+        if isinstance(fat, (int, float)): return float(fat)
+        return float((fat or {}).get("fatigue_index") or 0)
+
+    h_fat = max(0.85, 1.0 - _fi(fatigue_h) * 0.002)
+    a_fat = max(0.85, 1.0 - _fi(fatigue_a) * 0.002)
 
     return round(lh * cli * h_fat, 4), round(la * cli * a_fat, 4)
 
@@ -5229,10 +5237,15 @@ def generate_explainability_total(
             "away": round(cli * 3.0, 2),
         }
 
-    # Fatigue differential
-    if fatigue_h and fatigue_a:
-        fi_h = _safe(fatigue_h.get("fatigue_index"), 0)
-        fi_a = _safe(fatigue_a.get("fatigue_index"), 0)
+    # Fatigue differential (fatigue may be float or dict)
+    def _fi_val(fat):
+        if fat is None: return 0.0
+        if isinstance(fat, (int, float)): return float(fat)
+        return float((fat or {}).get("fatigue_index") or 0)
+
+    if fatigue_h is not None and fatigue_a is not None:
+        fi_h = _fi_val(fatigue_h)
+        fi_a = _fi_val(fatigue_a)
         fat_diff = fi_a - fi_h  # positive if away is more fatigued
         contribs["Fadiga"] = {
             "home": round(fat_diff * 0.03, 2),
