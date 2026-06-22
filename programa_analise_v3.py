@@ -7873,11 +7873,73 @@ def _render_bar(value, max_val, width=20, char="█"):
     return char * filled + "░" * (width - filled)
 
 
+def _sparkline(values, width=12):
+    """Mini gráfico de barras ASCII para série temporal."""
+    if not values:
+        return "─" * width
+    blocks = " ▁▂▃▄▅▆▇█"
+    mx = max(values) or 1
+    chars = []
+    for v in values[-width:]:
+        idx = int(v / mx * (len(blocks) - 1))
+        chars.append(blocks[idx])
+    # pad left with spaces if needed
+    return " " * (width - len(chars)) + "".join(chars)
+
+
+def _xg_live(snap, minute):
+    """Calcula xG acumulado e ritmo projetado para 90min."""
+    m = max(minute, 1)
+    xg_h = round(snap["h_sot"] / 4.5, 2)
+    xg_a = round(snap["a_sot"] / 4.5, 2)
+    xg_proj_h = round(xg_h + (snap["h_sot"] / m) * max(90 - minute, 0) / 4.5, 2)
+    xg_proj_a = round(xg_a + (snap["a_sot"] / m) * max(90 - minute, 0) / 4.5, 2)
+    return xg_h, xg_a, xg_proj_h, xg_proj_a
+
+
+def _live_narrative(snap, consciousness, regime, h_name, a_name):
+    """Gera frase de narrativa contextual para o momento atual do jogo."""
+    minute  = snap["minute"]
+    score_h = snap["score_h"]
+    score_a = snap["score_a"]
+    diff    = score_h - score_a
+
+    phase_name = consciousness["phase"]["phase"] if consciousness else "jogo"
+    sc_state   = consciousness.get("score_state", {}) if consciousness else {}
+    behavior   = sc_state.get("behavior", "")
+
+    # Regime dominante
+    regime_lbl = ""
+    if regime and regime.get("label"):
+        regime_lbl = f" [{regime['label'].split('–')[0].strip()}]"
+
+    # Pressão dominante
+    h_upi = snap["h_shots"]*2 + snap["h_sot"]*4 + snap["h_blocked"]*2 + snap["h_corners"]*3
+    a_upi = snap["a_shots"]*2 + snap["a_sot"]*4 + snap["a_blocked"]*2 + snap["a_corners"]*3
+    if h_upi > a_upi * 1.3:
+        pressure_txt = f"{h_name[:14]} domina territorialmente."
+    elif a_upi > h_upi * 1.3:
+        pressure_txt = f"{a_name[:14]} controla o jogo."
+    else:
+        pressure_txt = "Jogo equilibrado em volume."
+
+    # Score context
+    if diff == 0:
+        score_ctx = f"Empate {score_h}x{score_a} — {behavior[:50]}" if behavior else f"Empate {score_h}x{score_a}."
+    elif diff > 0:
+        score_ctx = f"{h_name[:12]} vence por {diff}. {behavior[:40]}" if behavior else f"{h_name[:12]} +{diff}."
+    else:
+        score_ctx = f"{a_name[:12]} vence por {abs(diff)}. {behavior[:40]}" if behavior else f"{a_name[:12]} +{abs(diff)}."
+
+    return f"{minute}' | {phase_name}{regime_lbl}. {pressure_txt} {score_ctx}"
+
+
 def _render_dashboard(snap, hist, h_name, a_name, home_id,
                        goal_sigs, corner_sigs, card_sigs,
                        poll_count, next_poll_in, consciousness=None,
                        live_fair=None, regime=None,
-                       false_pressure_h=None, false_pressure_a=None):
+                       false_pressure_h=None, false_pressure_a=None,
+                       live_events=None):
     """Renderiza o painel de trading ao vivo — layout limpo e actionable."""
     _clear()
 
@@ -7889,28 +7951,61 @@ def _render_dashboard(snap, hist, h_name, a_name, home_id,
 
     h_upi = snap["h_shots"]*2 + snap["h_sot"]*4 + snap["h_blocked"]*2 + snap["h_woodwork"]*5 + snap["h_corners"]*3
     a_upi = snap["a_shots"]*2 + snap["a_sot"]*4 + snap["a_blocked"]*2 + snap["a_woodwork"]*5 + snap["a_corners"]*3
+    xg_h, xg_a, xg_proj_h, xg_proj_a = _xg_live(snap, minute)
+
+    # UPI histórico para sparkline
+    h_upi_hist = [s["h_shots"]*2+s["h_sot"]*4+s["h_blocked"]*2+s["h_corners"]*3 for s in hist]
+    a_upi_hist = [s["a_shots"]*2+s["a_sot"]*4+s["a_blocked"]*2+s["a_corners"]*3 for s in hist]
+    h_spark = _sparkline(h_upi_hist + [h_upi], 10)
+    a_spark = _sparkline(a_upi_hist + [a_upi], 10)
+
+    # Posse
+    h_poss = snap.get("h_possession", 50) or 50
+    a_poss = snap.get("a_possession", 50) or (100 - h_poss)
+
+    # Alerta crítico
+    critical_alert = ""
+    if consciousness:
+        tension = consciousness.get("score_state", {}).get("tension", 0)
+        if tension >= 0.80:
+            critical_alert = "🔴 ALTA TENSÃO"
+        elif tension >= 0.55:
+            critical_alert = "🟠 TENSÃO CRESCENTE"
 
     # ── HEADER ────────────────────────────────────────────────────────
     print("╔" + "═"*W + "╗")
-    print(f"║  📡  TRADING AO VIVO  —  {h_name} x {a_name}".ljust(W+1) + "║")
-    print(f"║  ⏱  {minute}' [{status}]  •  {score_h} x {score_a}  •  Ciclo #{poll_count}  •  Próx: {next_poll_in}s".ljust(W+1) + "║")
+    hn14 = h_name[:16]
+    an14 = a_name[:16]
+    header = f"║  📡  {hn14}  {score_h} x {score_a}  {an14}"
+    print(header.ljust(W+1) + "║")
+    status_line = f"║  ⏱ {minute}' [{status}]  •  Ciclo #{poll_count}  •  Próx: {next_poll_in}s"
+    if critical_alert:
+        status_line += f"  {critical_alert}"
+    print(status_line.ljust(W+1) + "║")
 
-    # Fase do jogo
+    # Narrativa ao vivo
     if consciousness:
-        ph = consciousness["phase"]
-        print(f"║  {ph['emoji']} {ph['phase'].upper()}".ljust(W+1) + "║")
+        narr = _live_narrative(snap, consciousness, regime, h_name, a_name)
+        print(f"║  {narr[:W-2]}".ljust(W+1) + "║")
+
+    print("╠" + "═"*W + "╣")
+
+    # ── xG AO VIVO ────────────────────────────────────────────────────
+    print(f"║  ⚡ xG   {h_name[:14]}: {xg_h:.2f} acc  ({xg_proj_h:.2f}/90)   "
+          f"{a_name[:14]}: {xg_a:.2f} acc  ({xg_proj_a:.2f}/90)".ljust(W+1) + "║")
+    print(f"║  🏃 Posse  {h_name[:14]}: {h_poss:.0f}%   {a_name[:14]}: {a_poss:.0f}%".ljust(W+1) + "║")
 
     print("╠" + "═"*W + "╣")
 
     # ── ESTATÍSTICAS (tabela compacta) ────────────────────────────────
-    print(f"║  {'STAT':<18} {'CASA':>5}  {'':^12}  {'VISIT':<5}  ║")
+    print(f"║  {'STAT':<18} {'CASA':>5}  {'GRÁF':^14}  {'VISIT':>5}".ljust(W+1) + "║")
     print("║" + "─"*W + "║")
 
     def _row(label, hv, av):
         mv = max(hv, av, 1)
-        hb = _render_bar(hv, mv, 6)
-        ab = _render_bar(av, mv, 6)
-        print(f"║  {label:<18} {hv:>5}  {hb}|{ab}  {av:<5}  ║")
+        hb = _render_bar(hv, mv, 5)
+        ab = _render_bar(av, mv, 5)
+        print(f"║  {label:<18} {hv:>4}  {hb}║{ab}  {av:>4}".ljust(W+1) + "║")
 
     _row("UPI (Pressão)",   h_upi,              a_upi)
     _row("Chutes Totais",   snap["h_shots"],    snap["a_shots"])
@@ -7921,6 +8016,30 @@ def _render_dashboard(snap, hist, h_name, a_name, home_id,
     _row("At. Perigosos",   snap["h_dangerous"],snap["a_dangerous"])
     _row("Faltas",          snap["h_fouls"],    snap["a_fouls"])
     _row("Amarelos/Verm.",  snap["h_yellow"],   snap["a_yellow"])
+
+    # ── SPARKLINE UPI ─────────────────────────────────────────────────
+    if len(hist) >= 2:
+        print("║" + "─"*W + "║")
+        print(f"║  📊 Tendência UPI  {h_name[:12]}: [{h_spark}]={h_upi}  "
+              f"{a_name[:12]}: [{a_spark}]={a_upi}".ljust(W+1) + "║")
+
+    # ── EVENTOS AO VIVO (gols, cartões, substituições) ─────────────────
+    if live_events:
+        relevant = [e for e in live_events
+                    if e.get("type", "").lower() in ("goal", "card", "subst")]
+        if relevant:
+            print("╠" + "═"*W + "╣")
+            print(f"║  📋 EVENTOS DO JOGO".ljust(W+1) + "║")
+            print("║" + "─"*W + "║")
+            icons = {"goal": "⚽", "card": "🟨", "subst": "🔄"}
+            for ev in relevant[-6:]:
+                t    = ev.get("time", {}).get("elapsed", "?")
+                typ  = ev.get("type", "").lower()
+                team = ev.get("team", {}).get("name", "?")[:14]
+                player = ev.get("player", {}).get("name", "")[:16]
+                detail = ev.get("detail", "")[:12]
+                ic   = icons.get(typ, "•")
+                print(f"║  {ic} {t:>3}' {team:<14} {player:<16} {detail}".ljust(W+1) + "║")
 
     # ── SINAIS DE TRADING ─────────────────────────────────────────────
     print("╠" + "═"*W + "╣")
@@ -7934,7 +8053,7 @@ def _render_dashboard(snap, hist, h_name, a_name, home_id,
     )
 
     if all_signals:
-        for sig, _ in sorted(all_signals, key=lambda x: x[0]["score"], reverse=True):
+        for sig, _ in sorted(all_signals, key=lambda x: x[0]["score"], reverse=True)[:5]:
             icon = {"GOL": "⚽", "ESCANTEIO": "🚩", "CARTÃO": "🟨"}.get(sig["type"], "•")
             print(f"║  {icon} {sig['strength']} [{sig['type']}] {sig['team']}".ljust(W+1) + "║")
             print(f"║     {sig['detail'][:W-5]}".ljust(W+1) + "║")
@@ -7946,25 +8065,32 @@ def _render_dashboard(snap, hist, h_name, a_name, home_id,
         pred = consciousness.get("pred", {})
         if pred:
             print("╠" + "═"*W + "╣")
-            print(f"║  🎯 MERCADOS  —  PRÓXIMOS 5 MINUTOS".ljust(W+1) + "║")
+            print(f"║  🎯 PRÓXIMOS 5 MIN  —  Prováveis eventos".ljust(W+1) + "║")
+            print(f"║  {'MERCADO':<28} {'PROB':>4}  {'BARRA':^14}  {'SINAL':>12}".ljust(W+1) + "║")
             print("║" + "─"*W + "║")
 
             def _mkt_row(emoji, label, prob):
                 pct = int(prob * 100)
-                bar = _render_bar(pct, 100, 12)
-                rec_label, stars = _market_recommendation(prob)
+                bar = _render_bar(pct, 100, 10)
+                rec_label, _ = _market_recommendation(prob)
                 rec_icons = {"ENTRADA FORTE": "🟢", "ENTRADA": "🟡",
                              "AGUARDAR": "🟠", "EVITAR": "🔴"}
                 rec_icon = rec_icons.get(rec_label, "⚪")
-                print(f"║  {emoji} {label:<24} {pct:>3}%  {bar}  {rec_icon} {rec_label}".ljust(W+1) + "║")
+                print(f"║  {emoji} {label:<26} {pct:>3}%  {bar}  {rec_icon} {rec_label}".ljust(W+1) + "║")
 
-            _mkt_row("⚽", f"Gol ({h_name[:12]} ou {a_name[:6]})", pred.get("p_goal_any", 0))
-            _mkt_row("  ", f"  └ {h_name[:20]}",                    pred.get("p_goal_h",   0))
-            _mkt_row("  ", f"  └ {a_name[:20]}",                    pred.get("p_goal_a",   0))
-            _mkt_row("🚩", "Escanteio (qualquer)",                   pred.get("p_corner_any", 0))
-            _mkt_row("🟨", "Cartão (qualquer)",                      pred.get("p_card_any",   0))
+            _mkt_row("⚽", f"Gol qualquer",                        pred.get("p_goal_any", 0))
+            _mkt_row("  ", f"  └ {h_name[:22]}",                   pred.get("p_goal_h",   0))
+            _mkt_row("  ", f"  └ {a_name[:22]}",                   pred.get("p_goal_a",   0))
+            _mkt_row("🚩", "Escanteio (qualquer)",                  pred.get("p_corner_any", 0))
+            _mkt_row("🟨", "Cartão (qualquer)",                     pred.get("p_card_any",   0))
 
-            # Eventos críticos detectados pela consciência
+            # Quem é mais provável de marcar
+            likely = pred.get("likely_scorer", "")
+            if likely:
+                print("║" + "─"*W + "║")
+                print(f"║  📌 Mais provável marcar: {likely[:40]}".ljust(W+1) + "║")
+
+            # Eventos críticos
             clusters = consciousness.get("clusters", [])
             criticals = [c for c in clusters if c.get("urgency") in ("crítica", "muito alta")]
             if criticals:
@@ -7973,38 +8099,21 @@ def _render_dashboard(snap, hist, h_name, a_name, home_id,
                     urg_icon = "🔴" if c["urgency"] == "crítica" else "🟠"
                     print(f"║  {urg_icon} {c['msg'][:W-5]}".ljust(W+1) + "║")
 
-    # ── HISTÓRICO UPI ─────────────────────────────────────────────────
-    if len(hist) >= 2:
-        print("╠" + "═"*W + "╣")
-        all_h = [s["h_shots"]*2+s["h_sot"]*4+s["h_blocked"]*2+s["h_corners"]*3 for s in hist] + [h_upi]
-        all_a = [s["a_shots"]*2+s["a_sot"]*4+s["a_blocked"]*2+s["a_corners"]*3 for s in hist] + [a_upi]
-        ht = " ".join(str(v) for v in all_h[-6:])
-        at = " ".join(str(v) for v in all_a[-6:])
-        print(f"║  📊 UPI  {h_name[:14]:<14}: [{ht}]→{h_upi}".ljust(W+1) + "║")
-        print(f"║       {a_name[:14]:<14}: [{at}]→{a_upi}".ljust(W+1) + "║")
-
     # ── MOMENTUM ─────────────────────────────────────────────────────
     if consciousness and consciousness.get("momentum", {}).get("status") == "ok":
         mom = consciousness["momentum"]
         print("╠" + "═"*W + "╣")
         dom = mom.get("dominant")
-        dom_txt = f"  ▶ Dominante: {dom}" if dom else ""
+        dom_txt = f"  ▶ Dominante: {dom}" if dom else "  Equilíbrio"
         print(f"║  📈 MOMENTUM{dom_txt}".ljust(W+1) + "║")
-        print(f"║  {h_name[:20]:<20}: {mom['h_label'][:45]}".ljust(W+1) + "║")
-        print(f"║  {a_name[:20]:<20}: {mom['a_label'][:45]}".ljust(W+1) + "║")
-
-    # ── DIAG ─────────────────────────────────────────────────────────
-    if DIAG_MODE:
-        print("╠" + "═"*W + "╣")
-        for n in snap.get("_h_stat_names", []):
-            print(f"║  [DIAG] {n}".ljust(W+1) + "║")
-        if snap.get("_h_sot_estimated"):
-            print(f"║  ⚠ SOT estimado (33% shots)".ljust(W+1) + "║")
+        print(f"║  {h_name[:20]:<20}: {mom['h_label'][:46]}".ljust(W+1) + "║")
+        print(f"║  {a_name[:20]:<20}: {mom['a_label'][:46]}".ljust(W+1) + "║")
 
     # ── LIVE FAIR ODDS ────────────────────────────────────────────────
     if live_fair:
         print("╠" + "═"*W + "╣")
         print(f"║  ⚡ FAIR ODDS AO VIVO".ljust(W+1) + "║")
+        print(f"║  {'MERCADO':<32} {'FAIR':>6}  {'MKT':>6}  {'EDGE':>7}".ljust(W+1) + "║")
         print("║" + "─"*W + "║")
         for _lf_label, _lf_key in [
             (f"Próx. Gol {h_name[:14]}", "next_goal_h"),
@@ -8014,23 +8123,41 @@ def _render_dashboard(snap, hist, h_name, a_name, home_id,
         ]:
             _lf_val = live_fair.get(_lf_key)
             if _lf_val is not None:
-                print(f"║  {_lf_label:<30} {_lf_val:>8.2f}".ljust(W+1) + "║")
+                print(f"║  {_lf_label:<32} {_lf_val:>6.2f}".ljust(W+1) + "║")
 
     # ── GAME REGIME ───────────────────────────────────────────────────
     if regime:
         print("╠" + "═"*W + "╣")
-        print(f"║  {regime.get('label','?')}  (conf: {regime.get('confidence',0)*100:.0f}%)".ljust(W+1) + "║")
+        print(f"║  🎮 {regime.get('label','?')}  (conf: {regime.get('confidence',0)*100:.0f}%)".ljust(W+1) + "║")
         if regime.get("trading_advice"):
-            print(f"║    💡 {regime['trading_advice'][:W-6]}".ljust(W+1) + "║")
+            print(f"║  💡 {regime['trading_advice'][:W-5]}".ljust(W+1) + "║")
 
-    # ── FALSE PRESSURE ────────────────────────────────────────────────
-    if false_pressure_h and false_pressure_h.get("is_false_pressure"):
+    # ── PRESSÃO FALSA ────────────────────────────────────────────────
+    fp_shown = False
+    for fp, name in [(false_pressure_h, h_name), (false_pressure_a, a_name)]:
+        if fp and fp.get("is_false_pressure"):
+            if not fp_shown:
+                print("╠" + "═"*W + "╣")
+                fp_shown = True
+            print(f"║  ⚠ PRESSÃO FALSA — {name[:18]}  ({fp['reason'][:W-26]})".ljust(W+1) + "║")
+
+    # ── FADIGA ────────────────────────────────────────────────────────
+    if consciousness and consciousness.get("fatigue"):
+        for fat in consciousness["fatigue"][:2]:
+            if not fp_shown:
+                print("╠" + "═"*W + "╣")
+                fp_shown = True
+            mod = fat.get("modifier", 1.0)
+            icon = "💪" if mod >= 1.1 else "😓"
+            print(f"║  {icon} {fat['msg'][:W-4]}".ljust(W+1) + "║")
+
+    # ── DIAG ─────────────────────────────────────────────────────────
+    if DIAG_MODE:
         print("╠" + "═"*W + "╣")
-        print(f"║  ⚠ PRESSÃO FALSA — {h_name[:20]}  ({false_pressure_h['reason'][:W-28]})".ljust(W+1) + "║")
-    if false_pressure_a and false_pressure_a.get("is_false_pressure"):
-        if not (false_pressure_h and false_pressure_h.get("is_false_pressure")):
-            print("╠" + "═"*W + "╣")
-        print(f"║  ⚠ PRESSÃO FALSA — {a_name[:20]}  ({false_pressure_a['reason'][:W-28]})".ljust(W+1) + "║")
+        for n in snap.get("_h_stat_names", [])[:5]:
+            print(f"║  [DIAG] {n}".ljust(W+1) + "║")
+        if snap.get("_h_sot_estimated"):
+            print(f"║  ⚠ SOT estimado (33% shots)".ljust(W+1) + "║")
 
     print("╠" + "═"*W + "╣")
     print(f"║  [Q] Sair   Intervalo: {POLL_INTERVAL}s   [DIAG={DIAG_MODE}]".ljust(W+1) + "║")
@@ -8063,9 +8190,15 @@ def live_trading_dashboard(fixture_id, h_name, a_name, home_id):
 
         if snap is None:
             _clear()
-            print(f"\n⚠️  [{poll_count}] API indisponível ou partida não iniciada/encerrada.")
-            print(f"   Status da partida: verificando em {POLL_INTERVAL}s...")
-            print("   Digite 'q' + ENTER para sair.")
+            print("╔" + "═"*70 + "╗")
+            print(f"║  📡  TRADING AO VIVO  —  {h_name} x {a_name}".ljust(71) + "║")
+            print("╠" + "═"*70 + "╣")
+            print(f"║  ⚠  [{poll_count}] Aguardando dados da API...".ljust(71) + "║")
+            print(f"║     Partida pode não ter iniciado ou API temporariamente lenta.".ljust(71) + "║")
+            print(f"║     Verificando novamente em {POLL_INTERVAL}s.".ljust(71) + "║")
+            print("╠" + "═"*70 + "╣")
+            print(f"║  [Q] Sair".ljust(71) + "║")
+            print("╚" + "═"*70 + "╝")
         else:
             # Calcula sinais com base no snapshot + histórico
             goal_sigs    = _signal_goal(snap, history, h_name, a_name)
@@ -8112,13 +8245,18 @@ def live_trading_dashboard(fixture_id, h_name, a_name, home_id):
                 _regime = detect_game_regime(snap, history, h_name, a_name)
             except Exception:
                 _regime = None
+            try:
+                _live_events = _fetch_live_events(fixture_id)
+            except Exception:
+                _live_events = None
 
             # Renderiza painel
             _render_dashboard(snap, history, h_name, a_name, home_id,
                               goal_sigs, corner_sigs, card_sigs,
                               poll_count, POLL_INTERVAL, consciousness,
                               live_fair=_live_fair, regime=_regime,
-                              false_pressure_h=_fp_h, false_pressure_a=_fp_a)
+                              false_pressure_h=_fp_h, false_pressure_a=_fp_a,
+                              live_events=_live_events)
 
             # Mantém histórico limitado
             history.append(snap)
@@ -8466,8 +8604,14 @@ def _print_signal_log(signal_log):
     print(f"📋 LOG DE SINAIS FORTES ({len(signal_log)} alertas emitidos)")
     print(f"{'='*60}")
     for entry in signal_log:
-        icon = {"GOL": "⚽", "ESCANTEIO": "🚩", "CARTÃO": "🟨"}.get(entry["type"], "•")
-        print(f"  {icon} {entry['minute']:3d}' | {entry['type']:<10} | {entry['team']:<20} | {entry['strength']}")
+        icon = {"GOL": "⚽", "ESCANTEIO": "🚩", "CARTÃO": "🟨"}.get(entry.get("type", ""), "•")
+        print(f"  {icon} {entry.get('minute', '?'):>3}' | {entry.get('type','?'):<12} | "
+              f"{entry.get('team','?'):<18} | {entry.get('strength','')}")
+    # Resumo por tipo
+    from collections import Counter
+    tipos = Counter(e.get("type", "?") for e in signal_log)
+    print(f"{'─'*60}")
+    print(f"  Resumo: " + "  |  ".join(f"{t}: {n}" for t, n in tipos.most_common()))
     print(f"{'='*60}")
 
 
