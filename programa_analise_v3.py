@@ -678,1260 +678,41 @@ def list_world_cup_matches_today():
 
 
 def world_cup_match_menu():
-    """Menu intermediário de caminhos analíticos para o jogo selecionado."""
+    """Menu de análise para o jogo selecionado — V3 PRO."""
     global selected_match
     while True:
         print("\n" + "=" * 60)
-        print(f"📊 COPA DO MUNDO: {selected_match['home_name']} x {selected_match['away_name']}")
-        print(f"⏰ Horário: {selected_match['time']} DF | ID: {selected_match['fixture_id']}")
+        print(f"📊 {selected_match['home_name']} x {selected_match['away_name']}")
+        print(f"⏰ {selected_match['time']} (Brasília)  |  ID: {selected_match['fixture_id']}")
         print("=" * 60)
-        print("1 - 📈 ANÁLISE PRÉ-LIVE AVANÇADA V2.1 (25 Blocos)")
-        print("2 - ⚡ ESTATÍSTICAS AO VIVO (Monitoramento)")
-        print("3 - 🚀 ANÁLISE V3 PRO (12 Módulos Avançados)")
-        print("4 - ↩️ Voltar ao Menu Anterior")
+        print("1 - 🚀 ANÁLISE PRÉ-JOGO V3 PRO (Relatório Completo)")
+        print("2 - 📡 TRADING AO VIVO (Dashboard Automático)")
+        print("3 - 🎯 MELHORES OPORTUNIDADES (Value Bets)")
+        print("4 - ↩️  Voltar")
 
-        option = input("\nEscolha a funcionalidade: ")
+        option = input("\nEscolha: ")
 
         if option == "1":
-            execute_advanced_pre_live_analysis_v21()
-        elif option == "2":
-            world_cup_live_submenu()
-        elif option == "3":
             execute_advanced_pre_live_analysis_v3()
+        elif option == "2":
+            _live_submenu_v3()
+        elif option == "3":
+            scan_best_opportunities()
         elif option == "4":
             break
         else:
             print("❌ Opção inválida!")
 
 
-# =====================================================================
-# CORE ENGINE: MATRIZ DE ANÁLISE PRÉ-LIVE AVANÇADA V2.1 (25 BLOCOS)
-# =====================================================================
-
-def execute_advanced_pre_live_analysis_v21():
-    """
-    Executa a checagem preditiva e descritiva estruturada em 25 blocos de inteligência.
-    Aplica as Regras Críticas nº 1 e nº 2 para amarração e consistência dos dados.
-    """
+def _live_submenu_v3():
+    """Submenu ao vivo — acesso direto ao trading dashboard."""
     global selected_match
-    print("\n" + "=" * 70)
-    print(f"🚀 EXECUTANDO DIAGNÓSTICO MATEMÁTICO PRÉ-LIVE AVANÇADO V2.1")
-    print(f"   CONFRONTO: {selected_match['home_name']} vs {selected_match['away_name']}")
-    print("=" * 70)
-
-    h_id = selected_match['home_id']
-    a_id = selected_match['away_id']
-    raw_fixture = selected_match['raw_data']
-
-    # --- BUSCA DE DADOS REAIS (SUBSTITUI VALORES FIXOS POR CONSULTAS DE API) ---
-    real_referee = raw_fixture.get("fixture", {}).get("referee")
-    real_odds = get_fixture_odds(selected_match["fixture_id"])
-    h_injuries = get_team_injuries(h_id, selected_match["fixture_id"])
-    a_injuries = get_team_injuries(a_id, selected_match["fixture_id"])
-    h2h_matches = get_head_to_head_matches(h_id, a_id, limit=5)
-    h_group_standing = get_group_standing(h_id, WORLD_CUP_LEAGUE_ID, WORLD_CUP_SEASON)
-    a_group_standing = get_group_standing(a_id, WORLD_CUP_LEAGUE_ID, WORLD_CUP_SEASON)
-
-    # Sub-rotina resiliente para busca retroativa (Tenta obter amostragem ideal de 5 jogos)
-    def fetch_historical_context(team_id, sample_size=5):
-      try:
-          fixtures = []
-
-          # 1 - Copa do Mundo
-          params = {
-              "team": team_id,
-              "league": WORLD_CUP_LEAGUE_ID,
-              "season": WORLD_CUP_SEASON,
-              "status": "FT",
-              "last": sample_size
-          }
-
-          res = requests.get(
-              f"{BASE_URL}/fixtures",
-              headers=headers,
-              params=params
-          ).json()
-
-          fixtures.extend(res.get("response", []))
-
-          # 2 - Se ainda não tiver jogos suficientes
-          if len(fixtures) < sample_size:
-
-              params = {
-                  "team": team_id,
-                  "status": "FT",
-                  "last": 20
-              }
-
-              res = requests.get(
-                  f"{BASE_URL}/fixtures",
-                  headers=headers,
-                  params=params
-              ).json()
-
-              extra_games = res.get("response", [])
-
-              valid_keywords = [
-                  "World Cup",
-                  "World Cup Qualification",
-                  "UEFA Nations League",
-                  "Euro Championship",
-                  "Copa America",
-                  "Gold Cup",
-                  "African Cup of Nations",
-                  "Asian Cup",
-                  "Friendlies"
-              ]
-
-              for game in extra_games:
-
-                  league_name = game["league"]["name"]
-
-                  if any(k in league_name for k in valid_keywords):
-
-                      fixture_id = game["fixture"]["id"]
-
-                      if not any(
-                          f["fixture"]["id"] == fixture_id
-                          for f in fixtures
-                      ):
-                          fixtures.append(game)
-
-                  if len(fixtures) >= sample_size:
-                      break
-
-          return fixtures[:sample_size]
-
-      except Exception as e:
-          print(
-              f"⚠️ Erro ao consultar histórico do time {team_id}: {e}"
-          )
-          return []
-
-    def compile_v21_metrics(fixtures, team_id, divisor_real):
-        # Proteção contra falhas no preenchimento de variáveis internas (Bloco 25)
-        try:
-            metrics = {
-                "res_calc": [], "res_disp": [], "pts_calc": 0, "pts_disp": 0,
-                "gf_calc": 0, "gf_disp": 0, "gc_calc": 0, "gc_disp": 0,
-                "shots_calc": 0, "shots_on_target_calc": 0, "possession_calc": 0, "corners_calc": 0,
-                "clean_sheets_calc": 0, "clean_sheets_disp": 0, "yellow_cards_calc": 0, "red_cards_calc": 0,
-                "btts_calc": 0, "o15_calc": 0, "o25_calc": 0, "o35_calc": 0, "u25_calc": 0, "u35_calc": 0,
-                "opponents_calc": [], "last_match_date": None, "shots_disp": 0, "shots_on_target_disp": 0,
-                "possession_disp": 0, "corners_disp": 0, "yellow_cards_disp": 0, "red_cards_disp": 0,
-                "btts_disp": 0, "o15_disp": 0, "o25_disp": 0, "o35_disp": 0, "u25_disp": 0, "u35_disp": 0,
-                "shots_suff_calc": 0, "shots_suff_on_target_calc": 0,
-                "shots_suff_disp": 0, "shots_suff_on_target_disp": 0,
-                "weighted_pts": 0.0, "weighted_gf": 0.0, "weighted_gc": 0.0, "weight_total": 0.0,
-                "style_possession_samples": [], "style_corners_samples": [], "style_shots_samples": []
-            }
-
-            if not fixtures:
-                return None
-
-            metrics["last_match_date"] = fixtures[0]["fixture"]["date"][:10] if fixtures else None
-
-            for idx, f in enumerate(fixtures):
-                is_home = int(f["teams"]["home"]["id"]) == int(team_id)
-                gf = f["goals"]["home"] if is_home else f["goals"]["away"]
-                gc = f["goals"]["away"] if is_home else f["goals"]["home"]
-
-                opp_team = f["teams"]["away" if is_home else "home"]
-                metrics["opponents_calc"].append({"name": opp_team["name"], "id": opp_team["id"]})
-
-                # Acumulação base (Tamanho de Amostra Real)
-                metrics["gf_calc"] += gf
-                metrics["gc_calc"] += gc
-                if gf > gc:
-                    metrics["res_calc"].append("V")
-                    metrics["pts_calc"] += 3
-                elif gf == gc:
-                    metrics["res_calc"].append("E")
-                    metrics["pts_calc"] += 1
-                else:
-                    metrics["res_calc"].append("D")
-
-                if gf > 0 and gc > 0: metrics["btts_calc"] += 1
-                total_g = gf + gc
-                if total_g > 1.5: metrics["o15_calc"] += 1
-                if total_g > 2.5: metrics["o25_calc"] += 1
-                if total_g > 3.5: metrics["o35_calc"] += 1
-                if total_g < 2.5: metrics["u25_calc"] += 1
-                if total_g < 3.5: metrics["u35_calc"] += 1
-                if gc == 0: metrics["clean_sheets_calc"] += 1
-
-                # --- FORMA RECENTE PONDERADA ---
-                # Jogo mais recente (idx=0) tem peso 1.0; cada jogo mais antigo perde peso
-                # geometricamente (fator 0.75). Isso evita que um resultado de 5 jogos atrás
-                # pese o mesmo que o jogo de ontem — um time pode ter mudado de momento.
-                weight = 0.75 ** idx
-                metrics["weight_total"] += weight
-                metrics["weighted_gf"] += gf * weight
-                metrics["weighted_gc"] += gc * weight
-                if gf > gc:
-                    metrics["weighted_pts"] += 3 * weight
-                elif gf == gc:
-                    metrics["weighted_pts"] += 1 * weight
-
-                # Visualização restrita (Últimos 3 jogos)
-                if idx < 3:
-                    metrics["gf_disp"] += gf
-                    metrics["gc_disp"] += gc
-                    if gf > gc:
-                        metrics["res_disp"].append("V")
-                        metrics["pts_disp"] += 3
-                    elif gf == gc:
-                        metrics["res_disp"].append("E")
-                        metrics["pts_disp"] += 1
-                    else:
-                        metrics["res_disp"].append("D")
-
-                    if gf > 0 and gc > 0: metrics["btts_disp"] += 1
-                    if total_g > 1.5: metrics["o15_disp"] += 1
-                    if total_g > 2.5: metrics["o25_disp"] += 1
-                    if total_g > 3.5: metrics["o35_disp"] += 1
-                    if total_g < 2.5: metrics["u25_disp"] += 1
-                    if total_g < 3.5: metrics["u35_disp"] += 1
-                    if gc == 0: metrics["clean_sheets_disp"] += 1
-
-                # Consumo de estatísticas individuais
-                try:
-                    stats_res = requests.get(f"{BASE_URL}/fixtures/statistics", headers=headers, params={"fixture": f["fixture"]["id"]}).json()
-                    if stats_res.get("response"):
-                        t_idx = 0 if is_home else 1
-                        opp_idx = 1 if is_home else 0
-
-                        t_stats = stats_res["response"][t_idx]
-                        opp_stats = stats_res["response"][opp_idx]
-
-                        def parse_stat(st_json, st_type):
-                            for s in st_json.get("statistics", []):
-                                if s["type"] == st_type:
-                                    v = str(s["value"]).replace("%", "").strip()
-                                    return int(v) if v.isdigit() else 0
-                            return 0
-
-                        shots = parse_stat(t_stats, "Total Shots")
-                        s_target = parse_stat(t_stats, "Shots on Goal")
-                        poss = parse_stat(t_stats, "Ball Possession")
-                        corn = parse_stat(t_stats, "Corner Kicks")
-                        yel = parse_stat(t_stats, "Yellow Cards")
-                        red = parse_stat(t_stats, "Red Cards")
-
-                        suff_shots = parse_stat(opp_stats, "Total Shots")
-                        suff_target = parse_stat(opp_stats, "Shots on Goal")
-
-                        metrics["shots_calc"] += shots
-                        metrics["shots_on_target_calc"] += s_target
-                        metrics["possession_calc"] += poss
-                        metrics["corners_calc"] += corn
-                        metrics["yellow_cards_calc"] += yel
-                        metrics["red_cards_calc"] += red
-                        metrics["shots_suff_calc"] += suff_shots
-                        metrics["shots_suff_on_target_calc"] += suff_target
-
-                        metrics["style_possession_samples"].append(poss)
-                        metrics["style_corners_samples"].append(corn)
-                        metrics["style_shots_samples"].append(shots)
-
-                        if idx < 3:
-                            metrics["shots_disp"] += shots
-                            metrics["shots_on_target_disp"] += s_target
-                            metrics["possession_disp"] += poss
-                            metrics["corners_disp"] += corn
-                            metrics["yellow_cards_disp"] += yel
-                            metrics["red_cards_disp"] += red
-                            metrics["shots_suff_disp"] += suff_shots
-                            metrics["shots_suff_on_target_disp"] += suff_target
-                except Exception as inner_e:
-                    # Captura silenciosa e aplicação de fallback seguro por jogo (Bloco 25)
-                    pass
-
-            # --- REGRA CRÍTICA Nº 2: CÁLCULOS AMORTECIDOS PELO DIVISOR REAL ENCONTRADO ---
-            metrics["avg_gf_calc"] = metrics["gf_calc"] / divisor_real
-            metrics["avg_gc_calc"] = metrics["gc_calc"] / divisor_real
-            metrics["avg_shots_calc"] = metrics["shots_calc"] / divisor_real
-            metrics["avg_shots_target_calc"] = metrics["shots_on_target_calc"] / divisor_real
-            metrics["avg_poss_calc"] = metrics["possession_calc"] / divisor_real if metrics["possession_calc"] > 0 else 50
-            metrics["avg_corners_calc"] = metrics["corners_calc"] / divisor_real
-            metrics["avg_suff_shots_calc"] = metrics["shots_suff_calc"] / divisor_real
-            metrics["avg_suff_target_calc"] = metrics["shots_suff_on_target_calc"] / divisor_real
-            metrics["aproveitamento_calc"] = (metrics["pts_calc"] / (divisor_real * 3)) * 100
-
-            # Forma ponderada final: aproveitamento (%) dando mais peso a jogos recentes
-            if metrics["weight_total"] > 0:
-                metrics["weighted_avg_gf"] = metrics["weighted_gf"] / metrics["weight_total"]
-                metrics["weighted_avg_gc"] = metrics["weighted_gc"] / metrics["weight_total"]
-                metrics["weighted_aproveitamento"] = (metrics["weighted_pts"] / (metrics["weight_total"] * 3)) * 100
-            else:
-                metrics["weighted_avg_gf"] = metrics["avg_gf_calc"]
-                metrics["weighted_avg_gc"] = metrics["avg_gc_calc"]
-                metrics["weighted_aproveitamento"] = metrics["aproveitamento_calc"]
-
-            n_disp = min(divisor_real, 3)
-            metrics["avg_gf_disp"] = metrics["gf_disp"] / n_disp
-            metrics["avg_gc_disp"] = metrics["gc_disp"] / n_disp
-            metrics["avg_shots_disp"] = metrics["shots_disp"] / n_disp
-            metrics["avg_shots_target_disp"] = metrics["shots_on_target_disp"] / n_disp
-            metrics["avg_poss_disp"] = metrics["possession_disp"] / n_disp if metrics["possession_disp"] > 0 else 50
-            metrics["avg_corners_disp"] = metrics["corners_disp"] / n_disp
-            metrics["avg_suff_shots_disp"] = metrics["shots_suff_disp"] / n_disp
-            metrics["avg_suff_target_disp"] = metrics["shots_suff_on_target_disp"] / n_disp
-            metrics["aproveitamento_disp"] = (metrics["pts_disp"] / (n_disp * 3)) * 100
-
-            return metrics
-        except NameError as name_err:
-            print(f"⚠️ Variável ausente: {name_err}. Continuando análise com valor padrão seguro.")
-            return None
-        except Exception as general_e:
-            print(f"⚠️ Erro detectado no processamento: {general_e}. Aplicando redundância estrutural.")
-            return None
-
-    # Busca o histórico retroativo de cada equipe (Regra Crítica nº 1)
-    home_history = fetch_historical_context(h_id, sample_size=5)
-    away_history = fetch_historical_context(a_id, sample_size=5)
-
-    h_calc_divisor = len(home_history) if home_history else 1
-    a_calc_divisor = len(away_history) if away_history else 1
-
-    h_m = compile_v21_metrics(home_history, h_id, h_calc_divisor)
-    a_m = compile_v21_metrics(away_history, a_id, a_calc_divisor)
-
-    # Dicionários de fallback blindados em caso de base de dados nula (Bloco 25)
-    if not h_m:
-        h_m = {
-            "res_calc": ["V", "V", "E", "V", "D"], "res_disp": ["V", "E", "V"], "pts_calc": 10, "pts_disp": 7,
-            "aproveitamento_calc": 66, "aproveitamento_disp": 73, "gf_calc": 11, "gf_disp": 8, "gc_calc": 4, "gc_disp": 3,
-            "avg_gf_calc": 2.2, "avg_gc_calc": 0.8, "avg_gf_disp": 2.66, "avg_gc_disp": 1.0, "avg_shots_calc": 16.2,
-            "avg_shots_target_calc": 6.4, "avg_poss_calc": 56, "avg_corners_calc": 6.8, "avg_shots_disp": 15.3,
-            "avg_shots_target_disp": 6.1, "avg_poss_disp": 58, "avg_corners_disp": 6.4, "yellow_cards_calc": 6,
-            "red_cards_calc": 0, "yellow_cards_disp": 3, "red_cards_disp": 0, "btts_calc": 3, "o15_calc": 4,
-            "o25_calc": 3, "o35_calc": 2, "u25_calc": 2, "u35_calc": 3, "clean_sheets_calc": 2, "btts_disp": 1,
-            "o15_disp": 2, "o25_disp": 2, "o35_disp": 1, "u25_disp": 1, "u35_disp": 2, "clean_sheets_disp": 1,
-            "opponents_calc": [{"name": "Argentina", "id": 3}, {"name": "França", "id": 4}, {"name": "Marrocos", "id": 14}, {"name": "Escócia", "id": 42}, {"name": "México", "id": 17}],
-            "last_match_date": "2026-06-15", "avg_suff_shots_calc": 8.4, "avg_suff_target_calc": 2.8, "avg_suff_shots_disp": 8.2, "avg_suff_target_disp": 2.7,
-            "weighted_avg_gf": 2.1, "weighted_avg_gc": 0.9, "weighted_aproveitamento": 70,
-            "style_possession_samples": [56, 58, 54], "style_corners_samples": [7, 6, 7], "style_shots_samples": [16, 15, 17]
-        }
-    if not a_m:
-        a_m = {
-            "res_calc": ["D", "E", "D", "V", "D"], "res_disp": ["D", "E", "D"], "pts_calc": 4, "pts_disp": 1,
-            "aproveitamento_calc": 26, "aproveitamento_disp": 11, "gf_calc": 4, "gf_disp": 2, "gc_calc": 10, "gc_disp": 7,
-            "avg_gf_calc": 0.8, "avg_gc_calc": 2.0, "avg_gf_disp": 0.66, "avg_gc_disp": 2.33, "avg_shots_calc": 9.1,
-            "avg_shots_target_calc": 2.9, "avg_poss_calc": 43, "avg_corners_calc": 3.4, "avg_shots_disp": 8.5,
-            "avg_shots_target_disp": 2.5, "avg_poss_disp": 41, "avg_corners_disp": 3.1, "yellow_cards_calc": 8,
-            "red_cards_calc": 1, "yellow_cards_disp": 5, "red_cards_disp": 1, "btts_calc": 2, "o15_calc": 3,
-            "o25_calc": 3, "o35_calc": 1, "u25_calc": 2, "u35_calc": 4, "clean_sheets_calc": 1, "btts_disp": 1,
-            "o15_disp": 2, "o25_disp": 2, "o35_disp": 1, "u25_disp": 1, "u35_disp": 2, "clean_sheets_disp": 0,
-            "opponents_calc": [], "last_match_date": "2026-06-16", "avg_suff_shots_calc": 14.2, "avg_suff_target_calc": 5.8, "avg_suff_shots_disp": 13.5, "avg_suff_target_disp": 5.5,
-            "weighted_avg_gf": 0.7, "weighted_avg_gc": 2.2, "weighted_aproveitamento": 22,
-            "style_possession_samples": [42, 44, 41], "style_corners_samples": [3, 4, 3], "style_shots_samples": [9, 8, 10]
-        }
-
-    # --- BLOCO 4 (REVISADO): FORÇA GLOBAL CALCULADA PELO PRÓPRIO MODELO ---
-    # NOTA DE TRANSPARÊNCIA: a API-Football não fornece o Ranking FIFA oficial.
-    # O valor anterior era pseudoaleatório (function do team_id) e foi removido.
-    # Em vez de fingir um "ranking FIFA", o sistema agora exibe uma "Força
-    # Estimada" calculada a partir de aproveitamento recente, saldo de gols
-    # e volume de jogo -- e deixa claro que NÃO é o ranking FIFA oficial.
-    def estimate_team_strength_v21(m, divisor):
-        aproveitamento = m.get("aproveitamento_calc", 50)
-        saldo_medio = (m.get("gf_calc", 0) - m.get("gc_calc", 0)) / max(divisor, 1)
-        volume = m.get("avg_shots_target_calc", 4)
-        score = (aproveitamento * 0.5) + (saldo_medio * 8) + (volume * 2)
-        return max(10, min(100, int(score)))
-
-    h_force_global = estimate_team_strength_v21(h_m, h_calc_divisor)
-    a_force_global = estimate_team_strength_v21(a_m, a_calc_divisor)
-
-    # Bloco 3: Força média dos adversários enfrentados.
-    # Sem ranking FIFA oficial disponível na API, usa-se como proxy a posição
-    # real na tabela do grupo do torneio (dado real, via get_group_standing)
-    # dos próprios oponentes enfrentados. Se a posição de um oponente
-    # específico não puder ser obtida, ele é ignorado da média em vez de
-    # receber um valor inventado.
-    def compute_opponent_strength_v21(opponents):
-        if not opponents:
-            return None
-        strengths = []
-        for opp in opponents[:5]:
-            standing = get_group_standing(opp["id"], WORLD_CUP_LEAGUE_ID, WORLD_CUP_SEASON)
-            if standing:
-                rank_component = max(0, 100 - (standing["rank"] - 1) * 20)
-                gd_component = max(-30, min(30, standing["goalsDiff"] * 5))
-                strengths.append(max(10, min(100, (rank_component + gd_component) / 2 + 25)))
-        if not strengths:
-            return None
-        return int(sum(strengths) / len(strengths))
-
-    h_opp_strength_score = compute_opponent_strength_v21(h_m["opponents_calc"])
-    a_opp_strength_score = compute_opponent_strength_v21(a_m["opponents_calc"])
-
-    # Fallback explícito e neutro (não inventa "fácil" ou "difícil") quando
-    # não há dados suficientes para estimar a força dos adversários.
-    if h_opp_strength_score is None:
-        h_opp_strength_score = 50
-    if a_opp_strength_score is None:
-        a_opp_strength_score = 50
-
-    # --- 5. ATAQUE (PRODUÇÃO VS EFICIÊNCIA) ---
-    h_prod = min(100, int((h_m["avg_shots_calc"] * 2) + (h_m["avg_shots_target_calc"] * 5) + (h_m["avg_corners_calc"] * 3)))
-    h_eff = int((h_m["avg_gf_calc"] / max(h_m["avg_shots_target_calc"], 1)) * 100)
-    h_att_final = int((h_prod * 0.6) + (h_eff * 0.4))
-
-    a_prod = min(100, int((a_m["avg_shots_calc"] * 2) + (a_m["avg_shots_target_calc"] * 5) + (a_m["avg_corners_calc"] * 3)))
-    a_eff = int((a_m["avg_gf_calc"] / max(a_m["avg_shots_target_calc"], 1)) * 100)
-    a_att_final = int((a_prod * 0.6) + (a_eff * 0.4))
-
-    # --- 6. DEFESA (SOLIDEZ DEFENSIVA AJUSTADA PELA QUALIDADE DOS RIVAIS) ---
-    h_solidez_base = max(10, min(100, int(100 - (h_m["avg_gc_calc"] * 25 + h_m["avg_suff_target_calc"] * 4))))
-    a_solidez_base = max(10, min(100, int(100 - (a_m["avg_gc_calc"] * 25 + a_m["avg_suff_target_calc"] * 4))))
-    # Defesa Ajustada = Solidez Defensiva x Força Média dos Adversários (Normalizado para escala 0-100)
-    h_def_adjusted = min(100, int(h_solidez_base * (h_opp_strength_score / 75.0)))
-    a_def_adjusted = min(100, int(a_solidez_base * (a_opp_strength_score / 75.0)))
-
-    # --- 7. DOMINÂNCIA (PESOS ESTRITOS SEM FOCO EM POSSE DE BOLA) ---
-    def calculate_dominance_v21(m):
-        return min(
-            100,
-            int(
-                (m["avg_shots_target_calc"] * 6.0)
-                + (m["avg_shots_calc"] * 0.5)
-                + (m["avg_corners_calc"] * 3.0)
-                + (m["avg_poss_calc"] * 0.2)
-            )
-        )
-
-    h_dom = calculate_dominance_v21(h_m)
-    a_dom = calculate_dominance_v21(a_m)
-
-    # --- 15. MODELO DE ANÁLISE POISSON AJUSTADA ---
-    # Ajustada por Ataque, Defesa, Força Global e Qualidade dos Adversários Enfrentados
-    h_adj = (h_att_final / max(a_def_adjusted, 1)) * (h_force_global / a_force_global) * (h_opp_strength_score / a_opp_strength_score)
-    lambda_home = max(
-        0.3,
-        (
-            h_m["avg_gf_calc"] * 0.5
-            + (h_att_final / 100) * 1.5
-        )
-        * (h_adj ** 0.4)
+    live_trading_dashboard(
+        selected_match["fixture_id"],
+        selected_match["home_name"],
+        selected_match["away_name"],
+        selected_match["home_id"],
     )
-
-    lambda_away = max(
-        0.3,
-        (
-            a_m["avg_gf_calc"] * 0.5
-            + (a_att_final / 100) * 1.5
-        )
-        * ((1 / h_adj) ** 0.4)
-    )
-
-    home_win, draw, away_win = 0, 0, 0
-    btts_p, o15_p, o25_p, o35_p, u25_p, u35_p = 0, 0, 0, 0, 0, 0
-    score_probs = []
-
-    # Grade ampliada para 0-9 gols por equipe (antes era 0-5, que perdia até
-    # ~25% da massa de probabilidade quando uma seleção tem xG alto, como
-    # favoritos fortes). Isso distorcia BTTS, Over/Under, EV e os placares
-    # mais prováveis. A normalização abaixo garante soma exata de 100%
-    # independentemente de qualquer resíduo de truncamento residual.
-    MAX_GOALS_GRID = 10
-    for hg in range(MAX_GOALS_GRID):
-        for ag in range(MAX_GOALS_GRID):
-            p_h = poisson_probability(lambda_home, hg)
-            p_a = poisson_probability(lambda_away, ag)
-            p_joint = p_h * p_a
-            score_probs.append((hg, ag, p_joint))
-
-            if hg > ag: home_win += p_joint
-            elif hg == ag: draw += p_joint
-            else: away_win += p_joint
-
-            if hg > 0 and ag > 0: btts_p += p_joint
-            if (hg + ag) > 1.5: o15_p += p_joint
-            if (hg + ag) > 2.5: o25_p += p_joint
-            if (hg + ag) > 3.5: o35_p += p_joint
-            if (hg + ag) < 2.5: u25_p += p_joint
-            if (hg + ag) < 3.5: u35_p += p_joint
-
-    # Normalização: corrige o resíduo de truncamento (tipicamente <0.1% com
-    # grade 0-9) redistribuindo proporcionalmente. Aplicada a todos os
-    # mercados derivados da mesma grade, não só ao 1X2, para manter
-    # consistência interna entre os números exibidos.
-    _outcome_sum = home_win + draw + away_win
-    if _outcome_sum > 0:
-        home_win /= _outcome_sum
-        draw /= _outcome_sum
-        away_win /= _outcome_sum
-        btts_p /= _outcome_sum
-        o15_p /= _outcome_sum
-        o25_p /= _outcome_sum
-        o35_p /= _outcome_sum
-        u25_p /= _outcome_sum
-        u35_p /= _outcome_sum
-
-    score_probs.sort(key=lambda x: x[2], reverse=True)
-
-    # --- 9. CONTEXTO DE CLASSIFICAÇÃO (PESO MÁXIMO DE 5% NO SCORE) ---
-    def estimate_need_of_win(group_standing, fallback_pts):
-        # Prioriza dado real da tabela do grupo. Sem isso, usa o
-        # aproveitamento recente como proxy (menos preciso, mas honesto).
-        if group_standing:
-            rank = group_standing["rank"]
-            pts = group_standing["points"]
-            if rank >= 3 or pts <= 3:
-                return 90
-            elif rank == 2 or pts <= 6:
-                return 55
-            else:
-                return 20
-        return 95 if fallback_pts <= 4 else (70 if fallback_pts < 9 else 25)
-
-    h_need = estimate_need_of_win(h_group_standing, h_m["pts_calc"])
-    a_need = estimate_need_of_win(a_group_standing, a_m["pts_calc"])
-
-    # =================================================================
-    # EXIBIÇÃO DOS 25 BLOCOS ANALÍTICOS (INTERFACE DE TELA)
-    # =================================================================
-
-    # 1. RESUMO GERAL
-    print("\n## 1. RESUMO GERAL")
-    print(f"Probabilidade do Confronto: Vitória {selected_match['home_name']}: {home_win*100:.0f}% | Empate: {draw*100:.0f}% | Vitória {selected_match['away_name']}: {away_win*100:.0f}%")
-    print(f"Mercados Analisados: BTTS: {btts_p*100:.0f}% | Over 1.5: {o15_p*100:.0f}% | Over 2.5: {o25_p*100:.0f}% | Over 3.5: {o35_p*100:.0f}% | Under 2.5: {u25_p*100:.0f}% | Under 3.5: {u35_p*100:.0f}%")
-    print("Top 3 Placares Mais Prováveis:")
-    print(f"  1º Placar: {score_probs[0][0]}x{score_probs[0][1]} ({score_probs[0][2]*100:.1f}%)")
-    print(f"  2º Placar: {score_probs[1][0]}x{score_probs[1][1]} ({score_probs[1][2]*100:.1f}%)")
-    print(f"  3º Placar: {score_probs[2][0]}x{score_probs[2][1]} ({score_probs[2][2]*100:.1f}%)")
-
-    # 2. MOMENTO DAS SELEÇÕES
-    print("\n## 2. MOMENTO DAS SELEÇÕES")
-    for name, m in [(selected_match['home_name'], h_m), (selected_match['away_name'], a_m)]:
-        print(f"{name} (Visualização últimos 3 jogos):")
-        print(f"  • Sequência: {' '.join(m['res_disp'])} | Pontos: {m['pts_disp']} pts | Aproveitamento: {m['aproveitamento_disp']:.0f}%")
-        print(f"  • Gols Marcados: {m['gf_disp']} | Gols Sofridos: {m['gc_disp']} | Saldo: {m['gf_disp'] - m['gc_disp']:+d}")
-        print(f"  • Forma Ponderada (jogos recentes pesam mais): Aproveitamento {m['weighted_aproveitamento']:.0f}% | Média de Gols Pró: {m['weighted_avg_gf']:.2f} | Média de Gols Contra: {m['weighted_avg_gc']:.2f}")
-
-    # 3. QUALIDADE DOS ADVERSÁRIOS
-    print("\n## 3. QUALIDADE DOS ADVERSÁRIOS (ÚLTIMOS 5 JOGOS)")
-    for name, m, str_score in [(selected_match['home_name'], h_m, h_opp_strength_score), (selected_match['away_name'], a_m, a_opp_strength_score)]:
-        print(f"{name}:")
-        if m["opponents_calc"]:
-            for opp in m["opponents_calc"][:5]:
-                print(f"  - {opp['name']}")
-        else:
-            print("  - Sem amostra de adversários disponível para este time.")
-        print(f"  • Força Média dos Adversários (estimada pela posição no grupo, não é ranking FIFA): {str_score}/100")
-
-    # 4. FORÇA GLOBAL ESTIMADA
-    print("\n## 4. FORÇA GLOBAL ESTIMADA (NÃO É RANKING FIFA OFICIAL)")
-    print(f"  • {selected_match['home_name']} -> Força Estimada pelo Modelo: {h_force_global}/100")
-    print(f"  • {selected_match['away_name']} -> Força Estimada pelo Modelo: {a_force_global}/100")
-    if h_group_standing:
-        print(f"    Posição real no grupo: #{h_group_standing['rank']} | Pts: {h_group_standing['points']} | Saldo: {h_group_standing['goalsDiff']:+d}")
-    if a_group_standing:
-        print(f"    Posição real no grupo: #{a_group_standing['rank']} | Pts: {a_group_standing['points']} | Saldo: {a_group_standing['goalsDiff']:+d}")
-
-    # 4.1 CONFRONTOS DIRETOS (HEAD-TO-HEAD)
-    print("\n## 4.1 CONFRONTOS DIRETOS (HISTÓRICO REAL)")
-    if h2h_matches:
-        h_h2h_wins = a_h2h_wins = draws_h2h = 0
-        for m in h2h_matches[:5]:
-            gh, ga = m["goals"]["home"], m["goals"]["away"]
-            home_team_name = m["teams"]["home"]["name"]
-            away_team_name = m["teams"]["away"]["name"]
-            print(f"  {home_team_name} {gh}-{ga} {away_team_name}")
-            if gh == ga:
-                draws_h2h += 1
-            else:
-                winner_id = m["teams"]["home"]["id"] if gh > ga else m["teams"]["away"]["id"]
-                if int(winner_id) == int(h_id):
-                    h_h2h_wins += 1
-                elif int(winner_id) == int(a_id):
-                    a_h2h_wins += 1
-        print(f"  Resumo: {selected_match['home_name']} {h_h2h_wins}V | Empates {draws_h2h} | {selected_match['away_name']} {a_h2h_wins}V")
-    else:
-        print("  Nenhum confronto direto recente encontrado na base de dados.")
-
-    # 5. ATAQUE
-    print("\n## 5. ATAQUE (MÉTRICAS BASEADAS EM MÍNIMO DE 5 JOGOS)")
-    print(f"{selected_match['home_name']} -> Produção Ofensiva: {h_prod} | Eficiência Ofensiva: {h_eff}% | Nota Ataque Final: {h_att_final}/100")
-    print(f"{selected_match['away_name']} -> Produção Ofensiva: {a_prod} | Eficiência Ofensiva: {a_eff}% | Nota Ataque Final: {a_att_final}/100")
-
-    # 6. DEFESA
-    print("\n## 6. DEFESA (AJUSTADA PELA COMPUTAÇÃO DE RIVAIIS)")
-    print(f"{selected_match['home_name']} -> Solidez Base: {h_solidez_base}/100 | Defesa Ajustada Profissional: {h_def_adjusted}/100")
-    print(f"{selected_match['away_name']} -> Solidez Base: {a_solidez_base}/100 | Defesa Ajustada Profissional: {a_def_adjusted}/100")
-
-    # 7. DOMINÂNCIA
-    print("\n## 7. ÍNDICE DE DOMINÂNCIA (0-100 SEM FOCO EM POSSE DE BOLA)")
-    print(f"  • Dominância de Campo -> {selected_match['home_name']}: {h_dom}/100 | {selected_match['away_name']}: {a_dom}/100")
-
-    # 7.1 MATCHUP DE ESTILO TÁTICO (LEITURA DE SCOUT, NÃO PROBABILIDADE)
-    h_style = classify_team_style(h_m)
-    a_style = classify_team_style(a_m)
-    print("\n## 7.1 MATCHUP DE ESTILO TÁTICO")
-    print(f"  • {selected_match['home_name']}: {h_style['profile']}")
-    print(f"    Posse média: {h_style['avg_possession']}% | Escanteios/jogo: {h_style['avg_corners']} | Chutes/jogo: {h_style['avg_shots']}")
-    print(f"  • {selected_match['away_name']}: {a_style['profile']}")
-    print(f"    Posse média: {a_style['avg_possession']}% | Escanteios/jogo: {a_style['avg_corners']} | Chutes/jogo: {a_style['avg_shots']}")
-    print("  Leitura do confronto:")
-    for note in analyze_style_matchup(h_style, a_style):
-        print(f"    - {note}")
-
-    # 8. SITUAÇÃO DO GRUPO
-    print("\n## 8. SITUAÇÃO DO GRUPO")
-    print(f"  Pos | Equipe         | Pontos | Saldo de Gols")
-    if h_group_standing:
-        print(f"   {h_group_standing['rank']}  | {selected_match['home_name']:<14} | {h_group_standing['points']} pts  | {h_group_standing['goalsDiff']:+d}")
-    else:
-        print(f"   ?  | {selected_match['home_name']:<14} | dado de tabela indisponível")
-    if a_group_standing:
-        print(f"   {a_group_standing['rank']}  | {selected_match['away_name']:<14} | {a_group_standing['points']} pts  | {a_group_standing['goalsDiff']:+d}")
-    else:
-        print(f"   ?  | {selected_match['away_name']:<14} | dado de tabela indisponível")
-
-    # 9. CONTEXTO DE CLASSIFICAÇÃO
-    def need_label(score):
-        if score >= 80: return "Alto risco de eliminação / necessidade crítica de pontuar"
-        elif score >= 50: return "Briga direta por vaga / pressão moderada"
-        else: return "Situação confortável na classificação"
-
-    print("\n## 9. CONTEXTO DE CLASSIFICAÇÃO")
-    print(f"  • {selected_match['home_name']}: {need_label(h_need)}. Necessidade de Vitória: {h_need}/100")
-    print(f"  • {selected_match['away_name']}: {need_label(a_need)}. Necessidade de Vitória: {a_need}/100")
-
-    # 10. ESCALAÇÕES E DESFALQUES
-    print("\n## 10. ESCALAÇÕES E DESFALQUES")
-    print(f"  {selected_match['home_name']} -> Desfalques confirmados: {len(h_injuries)}")
-    for inj in h_injuries[:6]:
-        print(f"    - {inj['name']} ({inj['type']}: {inj['reason']})")
-    print(f"  {selected_match['away_name']} -> Desfalques confirmados: {len(a_injuries)}")
-    for inj in a_injuries[:6]:
-        print(f"    - {inj['name']} ({inj['type']}: {inj['reason']})")
-    if not h_injuries and not a_injuries:
-        print("  Nenhum desfalque confirmado encontrado na API no momento da consulta (pode não refletir decisões de última hora do treinador).")
-
-    # 11. DESCANSO
-    h_rest_days = calculate_rest_days(h_m.get("last_match_date"))
-    a_rest_days = calculate_rest_days(a_m.get("last_match_date"))
-    h_recovery = rest_recovery_index(h_rest_days)
-    a_recovery = rest_recovery_index(a_rest_days)
-    print("\n## 11. DESCANSO")
-    if h_rest_days is not None:
-        print(f"  • {selected_match['home_name']}: {h_rest_days} dias desde a última partida | Índice de Recuperação Física: {h_recovery}/100")
-    else:
-        print(f"  • {selected_match['home_name']}: data da última partida indisponível")
-    if a_rest_days is not None:
-        print(f"  • {selected_match['away_name']}: {a_rest_days} dias desde a última partida | Índice de Recuperação Física: {a_recovery}/100")
-    else:
-        print(f"  • {selected_match['away_name']}: data da última partida indisponível")
-
-    # 12. TENDÊNCIAS RECENTES
-    print("\n## 12. TENDÊNCIAS RECENTES (PERCENTUAIS CALCULADOS PELA QUANTIDADE REAL DE JOGOS)")
-    for name, m, real_j in [(selected_match['home_name'], h_m, h_calc_divisor), (selected_match['away_name'], a_m, a_calc_divisor)]:
-        print(f"  • {name} ({real_j} jogos analisados):")
-        print(f"    BTTS: {(m['btts_calc']/real_j)*100:.0f}% | Over 1.5: {(m['o15_calc']/real_j)*100:.0f}% | Over 2.5: {(m['o25_calc']/real_j)*100:.0f}% | Over 3.5: {(m['o35_calc']/real_j)*100:.0f}% | Under 2.5: {(m['u25_calc']/real_j)*100:.0f}% | Under 3.5: {(m['u35_calc']/real_j)*100:.0f}% | Clean Sheets: {(m['clean_sheets_calc']/real_j)*100:.0f}%")
-
-    # 13. CLIMA
-    # NOTA DE TRANSPARÊNCIA: a API-Football não fornece dados meteorológicos.
-    # O valor fixo anterior ("31°C, chuva") foi removido por ser inventado.
-    # Para clima real, seria necessário integrar uma API meteorológica
-    # separada (ex: Open-Meteo) usando o local e horário do estádio.
-    print("\n## 13. CLIMA")
-    print("  Dado indisponível: a fonte de dados atual (API-Football) não fornece informações meteorológicas.")
-    print("  Para análise de clima real, seria necessário integrar uma API de meteorologia à parte.")
-
-    # 14. ÁRBITRO
-    print("\n## 14. ÁRBITRO")
-    if real_referee:
-        print(f"  Juiz de Campo: {real_referee}")
-    else:
-        print("  Juiz de Campo: ainda não divulgado pela API para esta partida.")
-    print("  Médias disciplinares do árbitro: não disponíveis nesta fonte de dados (exigiria histórico dedicado por árbitro).")
-
-    # 15. POISSON AJUSTADA
-    print("\n## 15. POISSON AJUSTADA (AMORTECIDA PELA INTELIGÊNCIA DO MODELO)")
-    print(f"  Gols Esperados -> xG {selected_match['home_name']}: {lambda_home:.2f} | xG {selected_match['away_name']}: {lambda_away:.2f}")
-    print("  Top 5 Placares de Maior Densidade Probabilística:")
-    for idx, sc in enumerate(score_probs[:5], start=1):
-        print(f"   {idx}. Placar {sc[0]}x{sc[1]} -> Chance: {sc[2]*100:.1f}%")
-
-    # 16 & 17. MERCADO E VALOR ESPERADO (EV)
-    print("\n## 16. MERCADO")
-    if real_odds:
-        odd_h, odd_d, odd_a = real_odds["home"], real_odds["draw"], real_odds["away"]
-        mkt_h, mkt_d, mkt_a = (1/odd_h)*100, (1/odd_d)*100, (1/odd_a)*100
-        print(f"  Fonte: {real_odds.get('bookmaker', 'casa não identificada')} (odds reais consultadas na API)")
-        print(f"  {selected_match['home_name']}: Odds {odd_h:.2f} | Probabilidade Implícita: {mkt_h:.0f}%")
-        print(f"  Empate: Odds {odd_d:.2f} | Probabilidade Implícita: {mkt_d:.0f}%")
-        print(f"  {selected_match['away_name']}: Odds {odd_a:.2f} | Probabilidade Implícita: {mkt_a:.0f}%")
-
-        val_h = (home_win*100) - mkt_h
-        val_d = (draw*100) - mkt_d
-        val_a = (away_win*100) - mkt_a
-
-        print("\n## 17. VALOR ESPERADO (EV)")
-        print("  ⚠️ Aviso: este EV compara a probabilidade deste modelo com a odd de mercado.")
-        print("  Um EV positivo aqui NÃO é garantia de vantagem real -- o mercado tende a já")
-        print("  incorporar a maior parte da informação disponível. Trate como ponto de checagem,")
-        print("  não como sinal de aposta.")
-        print(f"  • EV {selected_match['home_name']}: {val_h:+.1f}%")
-        print(f"  • EV Empate: {val_d:+.1f}%")
-        print(f"  • EV {selected_match['away_name']}: {val_a:+.1f}%")
-    else:
-        odd_h = odd_d = odd_a = None
-        print("  Odds reais indisponíveis na API para esta partida (mercado pode não ter aberto ainda).")
-        print("\n## 17. VALOR ESPERADO (EV)")
-        print("  Não calculado: EV exige odds de mercado reais, que não estão disponíveis para esta partida.")
-
-    # 18. DUPLA CHANCE
-    print("\n## 18. DUPLA CHANCE")
-    print(f"  • {selected_match['home_name']} ou Empate: {(home_win + draw)*100:.0f}%")
-    print(f"  • {selected_match['home_name']} ou {selected_match['away_name']}: {(home_win + away_win)*100:.0f}%")
-    print(f"  • Empate ou {selected_match['away_name']}: {(draw + away_win)*100:.0f}%")
-
-    # 19. ESCANTEIOS
-    total_corners_expected = h_m["avg_corners_calc"] + a_m["avg_corners_calc"] + (h_dom * 0.02)
-    print("\n## 19. ESCANTEIOS")
-    print(f"  • Linha de Escanteios Esperados: {total_corners_expected:.1f}")
-    print(f"  Probabilidades: Over 8.5: {max(35, min(95, int(total_corners_expected * 8)))}% | Over 9.5: {max(25, min(85, int(total_corners_expected * 7.2)))}% | Over 10.5: {max(15, min(70, int(total_corners_expected * 6.1)))}%")
-
-    # 19.1 EVENTOS MAIS PROVÁVEIS (EQUIPE E HISTÓRICO DE JOGADOR)
-    print("\n## 19.1 EVENTOS MAIS PROVÁVEIS")
-    print("  ⚠️ Aviso: dados de JOGADOR abaixo são HISTÓRICOS (jogos passados), não uma")
-    print("  previsão de escalação titular -- a API não informa quem vai jogar com")
-    print("  antecedência suficiente. Trate como 'quem se destacou recentemente',")
-    print("  não como certeza de quem vai jogar hoje.")
-
-    # --- Escanteios por tempo (dado real via half=true, com parsing defensivo) ---
-    print(f"\n  Escanteios por tempo de jogo:")
-    h_corners_half = estimate_team_corners_by_half(h_id, home_history)
-    a_corners_half = estimate_team_corners_by_half(a_id, away_history)
-    for name, ch in [(selected_match['home_name'], h_corners_half), (selected_match['away_name'], a_corners_half)]:
-        if ch["format_confirmed"]:
-            fh_txt = f"{ch['first_half_avg']:.1f}" if ch['first_half_avg'] is not None else "n/d"
-            sh_txt = f"{ch['second_half_avg']:.1f}" if ch['second_half_avg'] is not None else "n/d"
-            print(f"    {name}: 1º tempo ~{fh_txt} | 2º tempo ~{sh_txt} (amostra: {ch['samples']} jogos)")
-        else:
-            print(f"    {name}: divisão por tempo indisponível nesta consulta (formato de resposta da API não confirmado para este endpoint/plano).")
-
-    # --- Cartões esperados da equipe (dado real, já calculado a partir do histórico) ---
-    print(f"\n  Cartões esperados (média por jogo, baseada no histórico real):")
-    h_cards_avg = (h_m["yellow_cards_calc"] + h_m["red_cards_calc"]) / max(h_calc_divisor, 1)
-    a_cards_avg = (a_m["yellow_cards_calc"] + a_m["red_cards_calc"]) / max(a_calc_divisor, 1)
-    print(f"    {selected_match['home_name']}: ~{h_cards_avg:.1f} cartões/jogo")
-    print(f"    {selected_match['away_name']}: ~{a_cards_avg:.1f} cartões/jogo")
-    total_cards_expected = h_cards_avg + a_cards_avg
-    print(f"    Total esperado na partida: ~{total_cards_expected:.1f} | Over 3.5 cartões: {max(20, min(90, int(total_cards_expected * 22)))}%")
-
-    # --- Gols por janela de tempo (dado real via eventos de gol históricos) ---
-    print(f"\n  Janela de tempo mais provável para gols (histórico real, % dos gols marcados):")
-    h_goal_windows = estimate_goals_by_time_window(home_history, h_id)
-    a_goal_windows = estimate_goals_by_time_window(away_history, a_id)
-    for name, gw in [(selected_match['home_name'], h_goal_windows), (selected_match['away_name'], a_goal_windows)]:
-        if gw:
-            best_window = max(gw["windows_pct"], key=gw["windows_pct"].get)
-            print(f"    {name} (amostra: {gw['total_goals_sampled']} gols): janela mais comum = {best_window} min ({gw['windows_pct'][best_window]}%)")
-        else:
-            print(f"    {name}: sem eventos de gol suficientes na amostra para estimar janela.")
-
-    # --- Jogadores em destaque (histórico real, não previsão de escalação) ---
-    print(f"\n  Jogadores em destaque (histórico real dos últimos jogos -- NÃO é previsão de titularidade):")
-    h_player_events = aggregate_player_event_history(home_history, h_id)
-    a_player_events = aggregate_player_event_history(away_history, a_id)
-    for name, pe in [(selected_match['home_name'], h_player_events), (selected_match['away_name'], a_player_events)]:
-        print(f"    {name}:")
-        if pe["top_shooters"]:
-            top_shooter_name, top_shooter_shots = pe["top_shooters"][0]
-            apps = pe["appearances"].get(top_shooter_name, 1)
-            print(f"      Mais finalizações: {top_shooter_name} ({top_shooter_shots} chutes em {apps} jogos, ~{top_shooter_shots/apps:.1f}/jogo)")
-        else:
-            print(f"      Dados de finalização por jogador indisponíveis para esta amostra.")
-        if pe["top_cards"] and pe["top_cards"][0][1] > 0:
-            top_card_name, top_card_count = pe["top_cards"][0]
-            apps = pe["appearances"].get(top_card_name, 1)
-            print(f"      Mais cartões: {top_card_name} ({top_card_count} cartões em {apps} jogos)")
-        else:
-            print(f"      Nenhum jogador com cartões recorrentes nesta amostra.")
-
-    # 20. ÍNDICE DE FORÇA
-    h_forma_fi = int(h_m["aproveitamento_calc"])
-    a_forma_fi = int(a_m["aproveitamento_calc"])
-    h_disc_fi = max(20, 100 - (h_m["yellow_cards_calc"] * 4 + h_m["red_cards_calc"] * 20))
-    a_disc_fi = max(20, 100 - (a_m["yellow_cards_calc"] * 4 + a_m["red_cards_calc"] * 20))
-    print("\n## 20. ÍNDICE DE FORÇA")
-    print(f"  • {selected_match['home_name']} -> Ataque: {h_att_final} | Defesa: {h_def_adjusted} | Forma: {h_forma_fi} | Disciplina: {h_disc_fi} | Dominância: {h_dom} | Força Global: {h_force_global}")
-    print(f"  • {selected_match['away_name']} -> Ataque: {a_att_final} | Defesa: {a_def_adjusted} | Forma: {a_forma_fi} | Disciplina: {a_disc_fi} | Dominância: {a_dom} | Força Global: {a_force_global}")
-
-    # 21. SCORE FINAL (PESOS PONDERADOS RECOMENDADOS)
-    score_h = (h_forma_fi * 0.25) + (h_att_final * 0.25) + (h_def_adjusted * 0.25) + (h_force_global * 0.20) + (h_need * 0.05)
-    score_a = (a_forma_fi * 0.25) + (a_att_final * 0.25) + (a_def_adjusted * 0.25) + (a_force_global * 0.20) + (a_need * 0.05)
-    diff = score_h - score_a
-
-    if abs(diff) <= 3: fav = "Equilibrado"
-    elif abs(diff) <= 7: fav = "Leve Favoritismo"
-    elif abs(diff) <= 12: fav = "Favoritismo Moderado"
-    elif abs(diff) <= 20: fav = "Favoritismo Forte"
-    else: fav = "Favoritismo Muito Forte"
-
-    print("\n## 21. SCORE FINAL")
-    print(f"  Score Computado: {selected_match['home_name']}: {score_h:.0f} | {selected_match['away_name']}: {score_a:.0f} (Diferença: {diff:+.1f})")
-    print(f"  Classificação de Linha: {fav}")
-
-    # 22. QUALIDADE DOS DADOS
-    h_count = len(home_history) if home_history else 0
-    a_count = len(away_history) if away_history else 0
-    print("\n## 22. QUALIDADE DOS DADOS")
-    print(f"  Jogos Encontrados: {h_count} (mandante) / {a_count} (visitante)")
-    print(f"  Lesões: {'Sim' if (h_injuries or a_injuries) else 'Nenhuma encontrada/indisponível'} | Odds: {'Sim' if real_odds else 'Indisponível'} | Árbitro: {'Sim' if real_referee else 'Indisponível'} | Tabela do Grupo: {'Sim' if (h_group_standing and a_group_standing) else 'Parcial/Indisponível'}")
-
-    sample_score = (min(h_count, a_count) / 5) * 100
-
-    # Sub-notas refletem disponibilidade REAL dos dados buscados nesta execução,
-    # não um valor fixo. Lesões usa 100 quando a consulta funcionou (mesmo que
-    # retorne lista vazia, pois "vazio" pode ser um resultado real legítimo);
-    # os demais refletem se o dado foi de fato obtido.
-    lineups_score = 50  # Endpoint de escalação não é consultado nesta análise pré-live
-    injuries_score = 100  # Consulta à API de lesões sempre executada com sucesso ou falha tratada
-    odds_score = 100 if real_odds else 0
-    standings_score = 100 if (h_group_standing and a_group_standing) else (50 if (h_group_standing or a_group_standing) else 0)
-
-    quality_score = int(
-        sample_score * 0.50
-        + lineups_score * 0.10
-        + injuries_score * 0.10
-        + odds_score * 0.15
-        + standings_score * 0.15
-    )
-
-    print(f"  Qualidade dos Dados (composta, baseada em disponibilidade real): {quality_score}%")
-
-    # 23. TAMANHO DA AMOSTRA (RENOMEADO -- NÃO É "CONFIABILIDADE" REAL)
-    # NOTA DE TRANSPARÊNCIA: a versão anterior tinha uma tabela de "confiabilidade"
-    # (conf_map) sem nenhuma base estatística -- só convertia quantidade de jogos
-    # em um número de 35% a 95% de forma arbitrária. Isso foi removido. O que
-    # de fato importa, e é honesto reportar, é o tamanho da amostra usada e o
-    # resultado da validação histórica do modelo (bloco 25, abaixo).
-    total_samples = min(h_count if h_count > 0 else 0, a_count if a_count > 0 else 0)
-    print("\n## 23. TAMANHO DA AMOSTRA")
-    print(f"  Jogos analisados -> {selected_match['home_name']}: {h_count} | {selected_match['away_name']}: {a_count}")
-    if total_samples < 3:
-        print("  ⚠️ Amostra pequena: resultados devem ser tratados com cautela adicional.")
-    elif total_samples < 5:
-        print("  Amostra moderada: razoável para leitura de tendência, mas não definitiva.")
-    else:
-        print("  Amostra completa (5 jogos por equipe).")
-
-    # --- 24. DIAGNÓSTICO TÉCNICO AUTOMÁTICO (VALIDAÇÃO DE CONSISTÊNCIA EM LOTE) ---
-    # NOTA DE TRANSPARÊNCIA: a versão anterior tinha testes que ou eram
-    # garantidos por construção matemática (nunca podiam falhar, ex: BTTS
-    # sempre <= 100% por definição) ou só checavam metade da lógica
-    # (condicionais que retornavam True automaticamente no outro caso).
-    # Os testes abaixo foram reescritos para detectar problemas reais:
-    # valores fora de faixa, simetrias quebradas, e violações de
-    # propriedades matemáticas que o código deveria garantir mas pode não
-    # garantir se houver um bug futuro.
-    print("\n## 24. DIAGNÓSTICO TÉCNICO AUTOMÁTICO")
-
-    def percentuais_em_faixa_valida(m, divisor):
-        # Toda métrica "_calc" dividida pelo divisor real precisa ficar entre 0 e 1
-        keys = ["btts_calc", "o15_calc", "o25_calc", "o35_calc", "u25_calc", "u35_calc", "clean_sheets_calc"]
-        return all(0 <= (m[k] / divisor) <= 1.0 for k in keys)
-
-    def time_mais_forte_tem_score_maior_ou_igual(h_force, a_force, sh, sa, margem=2):
-        # Se a diferença de força global é grande, o score final não deveria
-        # inverter o favoritismo na direção oposta -- pequenas inversões
-        # (margem) são aceitáveis por causa dos outros componentes do score.
-        if abs(h_force - a_force) < 15:
-            return True  # forças parecidas: não há expectativa forte a validar
-        if h_force > a_force:
-            return sh >= sa - margem
-        else:
-            return sa >= sh - margem
-
-    def probabilidades_somam_um(home_win, draw, away_win, tol=0.005):
-        return abs((home_win + draw + away_win) - 1.0) <= tol
-
-    def lambdas_em_faixa_realista(lh, la):
-        # xG de uma seleção em jogo único raramente foge de 0 a 6 gols esperados
-        return 0 < lh < 6 and 0 < la < 6
-
-    def defesa_ajustada_nao_inverte_solidez_base(solidez_base, def_adjusted, opp_strength):
-        # Se o adversário enfrentado foi mais fraco que a média (score < 50),
-        # a defesa ajustada não deveria FICAR MELHOR que a solidez base.
-        # Se foi mais forte (score > 50), não deveria piorar a solidez base.
-        if opp_strength < 45:
-            return def_adjusted <= solidez_base + 2
-        if opp_strength > 55:
-            return def_adjusted >= solidez_base - 2
-        return True
-
-    checklist = {
-        "Quantidade real de jogos carregados": h_count > 0 and a_count > 0,
-        "Percentuais dentro da faixa válida (0-100%)": (
-            percentuais_em_faixa_valida(h_m, h_calc_divisor) and percentuais_em_faixa_valida(a_m, a_calc_divisor)
-        ),
-        "Probabilidades do resultado somam ~100%": probabilidades_somam_um(home_win, draw, away_win),
-        "xG dentro de faixa realista (0-6 gols)": lambdas_em_faixa_realista(lambda_home, lambda_away),
-        "Score final coerente com força global (sem inversão grosseira)": time_mais_forte_tem_score_maior_ou_igual(
-            h_force_global, a_force_global, score_h, score_a
-        ),
-        "Defesa ajustada coerente com força do adversário enfrentado (mandante)": defesa_ajustada_nao_inverte_solidez_base(
-            h_solidez_base, h_def_adjusted, h_opp_strength_score
-        ),
-        "Defesa ajustada coerente com força do adversário enfrentado (visitante)": defesa_ajustada_nao_inverte_solidez_base(
-            a_solidez_base, a_def_adjusted, a_opp_strength_score
-        ),
-    }
-
-    inconsistencias = [k for k, v in checklist.items() if not v]
-    if inconsistencias:
-        print("  ⚠️ Alerta técnico detectado para depuração:")
-        for inc in inconsistencias:
-            print(f"    - Inconsistência na validação de: {inc}")
-    else:
-        print("  ✔ Todos os testes de consistência em lote validados com sucesso! [Sistema Íntegro]")
-
-    # --- 25. VALIDAÇÃO HISTÓRICA DO MODELO (BACKTESTING HONESTO) ---
-    print("\n## 25. VALIDAÇÃO HISTÓRICA DO MODELO (BACKTESTING)")
-    print("  Testando o modelo contra jogos passados reais de cada seleção...")
-    h_backtest = backtest_model_on_history(h_id)
-    a_backtest = backtest_model_on_history(a_id)
-
-    for name, bt in [(selected_match['home_name'], h_backtest), (selected_match['away_name'], a_backtest)]:
-        print(f"\n  {name}:")
-        if bt:
-            print(f"    Jogos validados: {bt['samples_validated']}")
-            print(f"    Brier Score do modelo: {bt['brier_score']} (0 = perfeito, {bt['reference_random']} = chute aleatório)")
-            print(f"    Taxa de acerto do resultado mais provável: {bt['hit_rate']}%")
-            print(f"    Referência de mercados eficientes: {bt['reference_market']}")
-            if bt['brier_score'] >= bt['reference_random'] - 0.03:
-                print("    ⚠️ Leitura: modelo muito próximo do chute aleatório nesta amostra -- trate as probabilidades com cautela.")
-            elif bt['brier_score'] <= 0.60:
-                print("    Leitura: modelo na faixa de mercados eficientes -- calibração razoável, mas isso não implica vantagem sobre as odds.")
-            else:
-                print("    Leitura: calibração intermediária -- nem ruído puro, nem nível de mercado profissional.")
-        else:
-            print("    Amostra histórica insuficiente para validar (mínimo de ~6 jogos necessários).")
-
-    print("\n  💡 Lembrete: este backtest mede CALIBRAÇÃO histórica, não garante acerto futuro.")
-    print("  Mesmo um modelo bem calibrado pode errar partidas individuais -- futebol tem variância alta.")
-
-    print("\n" + "=" * 70)
-    input("Pressione ENTER para retornar ao menu da partida...")
-
-
-def world_cup_live_submenu():
-    """Submenu de monitoramento dinâmico em tempo real."""
-    global selected_match
-    while True:
-        print("\n" + "=" * 60)
-        print(f"⚡ MODO AO VIVO: {selected_match['home_name']} x {selected_match['away_name']}")
-        print("=" * 60)
-        print("1 - 📊 Estatísticas em Tempo Real (Ações)")
-        print("2 - 🛑 Índice de Pressão Dinâmico")
-        print("3 - 🚨 Detector de Gol Avançado (Tendência)")
-        print("4 - 📐 Detector de Escanteio (Breve)")
-        print("5 - ↩️ Voltar ao Menu da Partida")
-
-        option = input("\nEscolha uma opção de monitoramento: ")
-
-        if option == "1":
-            stats = get_fixture_statistics(selected_match["fixture_id"])
-            if stats and len(stats) >= 2:
-                print(f"\n📊 Estatísticas de Jogo -> {stats[0]['team']['name']} vs {stats[1]['team']['name']}")
-                print("-" * 60)
-                for s1, s2 in zip(stats[0]["statistics"], stats[1]["statistics"]):
-                    print(f"{s1['type']}: {s1['value']} | {s2['value']}")
-            else:
-                print("⚠ Nenhuma estatística ao vivo disponível para este momento.")
-        elif option == "2":
-            pressure_analysis(selected_match["fixture_id"])
-        elif option == "3":
-            trend_goal_detector(selected_match["fixture_id"])
-        elif option == "4":
-            print("Detector de escanteio em desenvolvimento.")
-        elif option == "5":
-            break
-
-
-# =====================================================================
-# FUNÇÕES DO MODO ESTATÍSTICAS DE CLUBES (MENU TRADICIONAL)
-# =====================================================================
-
-def get_league_standings(team_id, league_id, season="2024"):
-    try:
-        url = f"{BASE_URL}/standings"
-        params = {"league": league_id, "season": season}
-        response = requests.get(url, headers=headers, params=params).json()
-        if response.get("response"):
-            standings = response["response"][0]["league"]["standings"]
-            for team in standings[0]:
-                if int(team["team"]["id"]) == int(team_id):
-                    print(f"{team['rank']}. {team['team']['name']} | Pts: {team['points']}")
-    except Exception as e:
-        print(f"⚠️ Variável ausente ou erro em standings. Continuando com fallback.")
-
-
-def get_last_five_league_matches(team_id, league_id, _=None):
-    global last_fixtures
-    try:
-        url = f"{BASE_URL}/fixtures"
-        params = {"team": team_id, "league": league_id, "season": "2024", "status": "FT", "last": 5}
-        res = requests.get(url, headers=headers, params=params).json()
-        if res.get("response"):
-            last_fixtures = []
-            for idx, m in enumerate(res["response"], start=1):
-                print(f"{idx}. {m['teams']['home']['name']} {m['goals']['home']}-{m['goals']['away']} {m['teams']['away']['name']}")
-                last_fixtures.append({"fixture_id": m["fixture"]["id"]})
-    except:
-        pass
-
-
-def get_team_stats(team_id):
-    try:
-        url = f"{BASE_URL}/fixtures"
-        params = {"team": team_id, "last": 5, "status": "FT"}
-        res = requests.get(url, headers=headers, params=params).json()
-        if res.get("response"):
-            for m in res["response"]:
-                print(f"  {m['teams']['home']['name']} {m['goals']['home']}-{m['goals']['away']} {m['teams']['away']['name']}")
-    except:
-        pass
-
-
-def get_head_to_head(team_id, opponent_id, limit=10):
-    try:
-        url = f"{BASE_URL}/fixtures/headtohead"
-        params = {"h2h": f"{team_id}-{opponent_id}", "last": limit}
-        res = requests.get(url, headers=headers, params=params).json()
-        if res.get("response"):
-            for m in res["response"]:
-                print(f"  {m['teams']['home']['name']} {m['goals']['home']}-{m['goals']['away']} {m['teams']['away']['name']}")
-    except:
-        pass
-
-
-def get_last_fixture_id(team_id, league_id, season="2024"):
-    try:
-        url = f"{BASE_URL}/fixtures"
-        params = {"team": team_id, "league": league_id, "season": season, "last": 1}
-        res = requests.get(url, headers=headers, params=params).json()
-        return res["response"][0]["fixture"]["id"] if res.get("response") else None
-    except:
-        return None
-
-
-def get_lineups(fixture_id, team_id, season, league_id):
-    try:
-        url = f"{BASE_URL}/fixtures/lineups"
-        params = {"fixture": fixture_id}
-        res = requests.get(url, headers=headers, params=params).json()
-        if res.get("response"):
-            print(f"Alinhamento tático mapeado.")
-    except:
-        pass
-
-
-# =====================================================================
-# MONITORAMENTO DINÂMICO REAL-TIME E ENGENHARIA DE PRESSÃO (REFATORADO)
-# =====================================================================
-
-def get_fixture_statistics(fixture_id):
-    try:
-        url = f"{BASE_URL}/fixtures/statistics"
-        res = requests.get(url, headers=headers, params={"fixture": fixture_id}).json()
-        return res.get("response", [])
-    except Exception as e:
-        print(f"⚠️ Erro ao buscar estatísticas ao vivo: {e}")
-        return []
-
-def extract_stat_value(team_block, stat_type):
-    """Extrai o valor de forma segura convertendo porcentagens e tratando nulos."""
-    for s in team_block.get("statistics", []):
-        if s.get("type") == stat_type:
-            val = str(s.get("value", "0")).replace("%", "").strip()
-            return int(val) if val.isdigit() else 0
-    return 0
-
-def pressure_analysis(fixture_id):
-    """Calcula o índice de pressão real com mapeamento completo de todas as tentativas de chutes."""
-    global selected_match
-    stats = get_fixture_statistics(fixture_id)
-    if len(stats) < 2:
-        print("⚠ Dados insuficientes em live para gerar índice de pressão.")
-        return None
-
-    # Identifica dinamicamente quem é mandante e visitante pelos IDs do jogo selecionado
-    if int(stats[0]["team"]["id"]) == int(selected_match["home_id"]):
-        home_block = stats[0]
-        away_block = stats[1]
-    else:
-        home_block = stats[1]
-        away_block = stats[0]
-
-    h_team = home_block["team"]["name"]
-    a_team = away_block["team"]["name"]
-
-    # Extração de TODOS os tipos de finalizações e eventos agudos
-    h_total_shots = extract_stat_value(home_block, "Total Shots")
-    h_on_goal     = extract_stat_value(home_block, "Shots on Goal")
-    h_blocked     = extract_stat_value(home_block, "Blocked Shots")
-    h_woodwork    = extract_stat_value(home_block, "Hit Woodwork")
-    h_big_chances = extract_stat_value(home_block, "Big Chances Missed")
-    h_corners     = extract_stat_value(home_block, "Corner Kicks")
-
-    a_total_shots = extract_stat_value(away_block, "Total Shots")
-    a_on_goal     = extract_stat_value(away_block, "Shots on Goal")
-    a_blocked     = extract_stat_value(away_block, "Blocked Shots")
-    a_woodwork    = extract_stat_value(away_block, "Hit Woodwork")
-    a_big_chances = extract_stat_value(away_block, "Big Chances Missed")
-    a_corners     = extract_stat_value(away_block, "Corner Kicks")
-
-    # =================================================================
-    # NOVO ALGORITMO: ULTRA PRESSURE INDEX (UPI)
-    # Cada tentativa de chute soma na base (Total Shots * 2).
-    # Adicionamos bônus por perigo: No alvo (+4), Bloqueado (+2), Trave (+5), Grande Chance (+3).
-    # Escanteios mantêm peso fixo de abafa (+3).
-    # =================================================================
-    h_press = (h_total_shots * 2) + (h_on_goal * 4) + (h_blocked * 2) + \
-              (h_woodwork * 5) + (h_big_chances * 3) + (h_corners * 3)
-
-    a_press = (a_total_shots * 2) + (a_on_goal * 4) + (a_blocked * 2) + \
-              (a_woodwork * 5) + (a_big_chances * 3) + (a_corners * 3)
-
-    print(f"\n🔥 ÍNDICE DE PRESSÃO ULTRA (Mapeamento Completo de Ataques):")
-    print(f"  • {h_team}: {h_press} pts [Chutes Totais: {h_total_shots} | No Alvo: {h_on_goal} | Bloqueados: {h_blocked}]")
-    print(f"  • {a_team}: {a_press} pts [Chutes Totais: {a_total_shots} | No Alvo: {a_on_goal} | Bloqueados: {a_blocked}]")
-
-    return {"home": h_press, "away": a_press, "home_team": h_team, "away_team": a_team}
-
-def trend_goal_detector(fixture_id):
-    """Avalia se o jogo está entrando em uma zona de tendência de gol iminente (UPI Base)."""
-    global pressure_history
-    pressao = pressure_analysis(fixture_id)
-    if not pressao: return
-
-    total_pressure_score = pressao["home"] + pressao["away"]
-    pressure_history.append(total_pressure_score)
-
-    if len(pressure_history) > 5:
-        pressure_history.pop(0)
-
-    print(f"\n🚨 DIAGNÓSTICO DE TENDÊNCIA (Soma UPI do Jogo): {pressure_history}")
-
-    if len(pressure_history) >= 3:
-        if pressure_history[-1] > pressure_history[-2] > pressure_history[-3]:
-            print("  站在 ALERTA CELESTE: O bombardeio aumentou! Ritmo acelerando drasticamente nos últimos minutos.")
-        elif pressao["home"] > 25 and pressao["away"] < 10:
-            print(f"  🟢 TENDÊNCIA DE GOL: {pressao['home_team']} acumulou volume total. Pressão sufocante.")
-        elif pressao["away"] > 25 and pressao["home"] < 10:
-            print(f"  🟢 TENDÊNCIA DE GOL: {pressao['away_team']} acumulou volume total. Pressão sufocante.")
-        elif total_pressure_score > 40:
-            print("  🟡 AVISO: Ambas as equipes estão tentando finalizar. Jogo quebrado de transições.")
-        else:
-            print("  White Ritmo morno. As tentativas atuais são fracas ou sem perigo real.")
-    else:
-        print("  ⏳ Coletando checkpoints de volume para análise de tendência...")
-
-def corner_trend_detector(fixture_id):
-    """
-    Analisa a tendência de novos escanteios com base em chutes bloqueados,
-    finalizações de lado de campo e volume de pressão.
-    """
-    stats = get_fixture_statistics(fixture_id)
-    if len(stats) < 2:
-        print("⚠ Dados insuficientes em live para prever escanteios.")
-        return
-
-    h_team = stats[0]["team"]["name"]
-    a_team = stats[1]["team"]["name"]
-
-    h_corners = extract_stat_value(stats[0], "Corner Kicks")
-    a_corners = extract_stat_value(stats[1], "Corner Kicks")
-    h_blocked = extract_stat_value(stats[0], "Blocked Shots")
-    a_blocked = extract_stat_value(stats[1], "Blocked Shots")
-    h_off_goal = extract_stat_value(stats[0], "Shots Off Goal")
-    a_off_goal = extract_stat_value(stats[1], "Shots Off Goal")
-
-    total_corners = h_corners + a_corners
-    h_ivl = (h_blocked * 2.5) + (h_off_goal * 1.2) + (h_corners * 1.0)
-    a_ivl = (a_blocked * 2.5) + (a_off_goal * 1.2) + (a_corners * 1.0)
-
-    print("\n" + "📐 " + "="*45 + " 📐")
-    print(f"   MONITORAMENTO DE CANTOS: {h_team} vs {a_team}")
-    print("   " + "="*45)
-    print(f"  • Placar de Cantos Atual: {h_corners} M | {a_corners} V (Total: {total_corners})")
-    print(f"  • Chutes Bloqueados: {h_blocked} M | {a_blocked} V")
-    print(f"  • Chutes para Fora: {h_off_goal} M | {a_off_goal} V")
-    print("-" * 49)
-    print(f"  🔥 Índice de Volume Lateral (IVL):")
-    print(f"     - {h_team} (Mandante): {h_ivl:.1f} pts")
-    print(f"     - {a_team} (Visitante): {a_ivl:.1f} pts")
-    print("-" * 49)
-
-    print("  🚨 SUGESTÃO DO MODELO PARA O MERCADO:")
-    if h_ivl > 20 and h_corners < (h_blocked + h_off_goal):
-        print(f"     🟢 INVESTIMENTO FORTE: {h_team} está em cenário de ABAFA.")
-        print(f"        Alto número de chutes bloqueados/fora em relação aos cantos saídos.")
-        print(f"        Valor claro para buscar a linha de '+1 Canto' ou 'Canto Asiático' a favor do Mandante.")
-    elif a_ivl > 20 and a_corners < (a_blocked + a_off_goal):
-        print(f"     🟢 INVESTIMENTO FORTE: {a_team} está em cenário de ABAFA.")
-        print(f"        O volume lateral do Visitante está esmagando a zaga adversária.")
-        print(f"        Excelente cenário para buscar escanteios a favor do Visitante.")
-    elif (h_ivl + a_ivl) > 30:
-        print("     🟡 MERCADO OVER GERAL: O jogo está vertical e muito aberto pelas pontas.")
-        print(f"        A linha geral de Over Escanteios da partida tende a pagar a longo prazo.")
-    else:
-        print("     ⚪ PASSE LONGE: Jogo concentrado no meio-campo ou times tentando entrar por dentro.")
-        print("        Massa de ataque lateral muito baixa. Sem valor para operar cantos pré-live ou live.")
-    print("  " + "="*45)
-
-def world_cup_live_submenu():
-    """Submenu de monitoramento dinâmico em tempo real ajustado para falhas de API."""
-    global selected_match
-    while True:
-        print("\n" + "=" * 60)
-        print(f"⚡ MODO AO VIVO: {selected_match['home_name']} x {selected_match['away_name']}")
-        print("=" * 60)
-        print("1 - 📊 Estatísticas em Tempo Real (Ações)")
-        print("2 - 🛑 Índice de Pressão Dinâmico")
-        print("3 - 🚨 Detector de Gol Avançado (Tendência)")
-        print("4 - 📐 Detector de Escanteio (Mapeamento de Cantos)")
-        print("5 - 📡 TRADING AO VIVO (Dashboard Automático)")
-        print("6 - ↩️ Voltar ao Menu da Partida")
-
-        option = input("\nEscolha uma opção de monitoramento: ")
-
-        if option == "1":
-            stats = get_fixture_statistics(selected_match["fixture_id"])
-            if len(stats) >= 2:
-                h_name = stats[0]["team"]["name"]
-                a_name = stats[1]["team"]["name"]
-                print(f"\n📊 Estatísticas de Jogo -> {h_name} vs {a_name}")
-                print("-" * 60)
-
-                all_types = set([s["type"] for s in stats[0]["statistics"]] + [s["type"] for s in stats[1]["statistics"]])
-                for t in sorted(all_types):
-                    v1 = extract_stat_value(stats[0], t)
-                    v2 = extract_stat_value(stats[1], t)
-                    p = "%" if "Possession" in t or "Passes" in t else ""
-                    print(f"  • {t:<25}: {v1}{p} | {v2}{p}")
-            else:
-                print("⚠ Nenhuma estatística ao vivo disponível para este momento.")
-        elif option == "2":
-            pressure_analysis(selected_match["fixture_id"])
-        elif option == "3":
-            trend_goal_detector(selected_match["fixture_id"])
-        elif option == "4":
-            corner_trend_detector(selected_match["fixture_id"])
-        elif option == "5":
-            live_trading_dashboard(selected_match["fixture_id"],
-                                   selected_match["home_name"],
-                                   selected_match["away_name"],
-                                   selected_match["home_id"])
-        elif option == "6":
-            break
 
 
 
@@ -4247,6 +3028,262 @@ def render_backtest_report(W: int = 70):
 
 
 
+
+# =====================================================================
+# SCANNER DE MELHORES OPORTUNIDADES — VALUE BETS DO DIA
+# =====================================================================
+
+def scan_best_opportunities():
+    """
+    Varre todos os jogos do dia, roda análise rápida V3 em cada um
+    e lista os mercados com maior EV (Value Bets) ordenados por retorno esperado.
+    """
+    print("\n" + "═"*70)
+    print("🎯  SCANNER DE MELHORES OPORTUNIDADES — VALUE BETS DO DIA")
+    print("═"*70)
+    print("⏳ Buscando jogos e calculando EV para cada partida...")
+    print("   (Pode levar 1-2 minutos)\n")
+
+    from datetime import datetime as _dt
+    today = _dt.now().strftime("%Y-%m-%d")
+    try:
+        res = requests.get(
+            f"{BASE_URL}/fixtures",
+            headers=headers,
+            params={
+                "league":   WORLD_CUP_LEAGUE_ID,
+                "season":   WORLD_CUP_SEASON,
+                "date":     today,
+                "timezone": "America/Sao_Paulo",
+            }
+        ).json()
+        fixtures = res.get("response", [])
+    except Exception as e:
+        print(f"❌ Erro ao buscar jogos: {e}")
+        input("ENTER para voltar.")
+        return
+
+    if not fixtures:
+        print("⚠️  Nenhum jogo encontrado para hoje.")
+        input("ENTER para voltar.")
+        return
+
+    print(f"✅ {len(fixtures)} jogo(s) encontrado(s). Analisando...\n")
+
+    all_opportunities = []
+
+    for idx, fix in enumerate(fixtures, 1):
+        h_id   = fix["teams"]["home"]["id"]
+        a_id   = fix["teams"]["away"]["id"]
+        h_name = fix["teams"]["home"]["name"]
+        a_name = fix["teams"]["away"]["name"]
+        fid    = fix["fixture"]["id"]
+        kickoff = fix["fixture"]["date"][:16].replace("T", " ")
+        status  = fix["fixture"]["status"]["short"]
+
+        print(f"  [{idx}/{len(fixtures)}] {h_name} x {a_name}  ", end="", flush=True)
+
+        if status in ("FT", "AET", "PEN", "FT_PEN", "CANC", "PST", "ABD"):
+            print("⏭ ignorado")
+            continue
+
+        try:
+            def _hist(tid, n=8):
+                try:
+                    return requests.get(
+                        f"{BASE_URL}/fixtures", headers=headers,
+                        params={"team": tid, "status": "FT", "last": n}
+                    ).json().get("response", [])
+                except Exception:
+                    return []
+
+            h_hist = _hist(h_id)
+            a_hist = _hist(a_id)
+
+            # xG lambdas
+            h_wxg, h_wxga = calculate_weighted_xg(get_team_xg_history(h_hist, h_id))
+            a_wxg, a_wxga = calculate_weighted_xg(get_team_xg_history(a_hist, a_id))
+            lh, la = calculate_xg_lambdas(h_wxg, a_wxga, a_wxg, h_wxga)
+
+            def _avg_gf(hist, tid):
+                goals = []
+                for f in hist[:6]:
+                    is_h = int(f["teams"]["home"]["id"]) == int(tid)
+                    goals.append(f["goals"]["home"] if is_h else f["goals"]["away"])
+                return sum(goals) / len(goals) if goals else 1.1
+
+            lh = lh if lh else _avg_gf(h_hist, h_id)
+            la = la if la else _avg_gf(a_hist, a_id)
+
+            # Poisson rápido
+            hw = dr = aw = btts = o15 = o25 = o35 = 0.0
+            for hg in range(10):
+                for ag in range(10):
+                    p = poisson_probability(lh, hg) * poisson_probability(la, ag)
+                    if hg > ag:    hw += p
+                    elif hg == ag: dr += p
+                    else:          aw += p
+                    if hg > 0 and ag > 0:  btts += p
+                    if hg + ag > 0:        o15  += p
+                    if hg + ag > 2:        o25  += p
+                    if hg + ag > 3:        o35  += p
+            s = hw + dr + aw
+            if s > 0:
+                hw /= s; dr /= s; aw /= s
+
+            # ELO
+            h_elo = calculate_team_elo(h_id)
+            a_elo = calculate_team_elo(a_id)
+            ep    = elo_win_probability(h_elo["elo"], a_elo["elo"])
+
+            # Ensemble rápido (sem MC completo para velocidade)
+            xg_sum = h_wxg + a_wxg
+            if xg_sum > 0:
+                xg_share_h = h_wxg / xg_sum
+                xg_share_a = a_wxg / xg_sum
+            else:
+                xg_share_h = xg_share_a = 0.5
+
+            ens_h = round(hw * 0.45 + ep["home_win"] * 0.30 + xg_share_h * 0.25, 4)
+            ens_a = round(aw * 0.45 + ep["away_win"] * 0.30 + xg_share_a * 0.25, 4)
+            ens_d = max(0.0, round(1.0 - ens_h - ens_a, 4))
+
+            ensemble_q = {
+                "home_win": ens_h, "draw": ens_d, "away_win": ens_a,
+                "btts": btts, "over15": o15, "over25": o25, "over35": o35,
+                "under25": max(0.0, 1.0 - o25),
+            }
+
+            # Odds
+            real_odds = get_fixture_odds(fid)
+            all_odds  = _fetch_all_odds_markets(fid, real_odds) if real_odds else {}
+
+            MARKET_MAP = {
+                "home_win": ("home",     f"Vitória {h_name[:14]}"),
+                "draw":     ("draw",     "Empate"),
+                "away_win": ("away",     f"Vitória {a_name[:14]}"),
+                "btts":     ("btts_yes", "BTTS Sim"),
+                "over15":   ("over15",   "Over 1.5"),
+                "over25":   ("over25",   "Over 2.5"),
+                "over35":   ("over35",   "Over 3.5"),
+                "under25":  ("under25",  "Under 2.5"),
+            }
+
+            for mkey, (odd_key, mlabel) in MARKET_MAP.items():
+                odd  = all_odds.get(odd_key)
+                if not odd:
+                    continue
+                prob = ensemble_q.get(mkey, 0)
+                if prob <= 0:
+                    continue
+                ev   = (prob * odd) - 1.0
+                if ev <= 0:
+                    continue
+                fair = round(1.0 / prob, 2) if prob > 0 else 99.9
+                cl   = classify_ev(ev)
+                all_opportunities.append({
+                    "fixture_id":   fid,
+                    "kickoff":      kickoff,
+                    "h_name":       h_name,
+                    "a_name":       a_name,
+                    "market":       mlabel,
+                    "prob_model":   round(prob * 100, 1),
+                    "prob_market":  round(100.0 / odd, 1),
+                    "odd":          odd,
+                    "fair_odd":     fair,
+                    "ev":           ev,
+                    "ev_pct":       round(ev * 100, 2),
+                    "stars":        cl["stars"],
+                    "label":        cl["label"],
+                    "ev_tier":      cl.get("tier", "weak"),
+                })
+
+            print("✅")
+
+        except Exception as ex:
+            print(f"⚠ {ex}")
+            continue
+
+    # ── Ordena por EV ─────────────────────────────────────────────────
+    all_opportunities.sort(key=lambda x: x["ev"], reverse=True)
+
+    # ── Renderiza relatório ────────────────────────────────────────────
+    W = 70
+    print()
+    print("╔" + "═"*W + "╗")
+    print(f"║  🎯 MELHORES OPORTUNIDADES — {today}".ljust(W+1) + "║")
+    print(f"║  {len(all_opportunities)} mercado(s) com EV positivo identificado(s)".ljust(W+1) + "║")
+    print("╠" + "═"*W + "╣")
+
+    if not all_opportunities:
+        print(f"║  ⚪ Nenhuma oportunidade com valor esperado positivo hoje.".ljust(W+1) + "║")
+        print("╚" + "═"*W + "╝")
+        input("\nENTER para voltar.")
+        return
+
+    TIERS = [
+        ("extreme",  "🔥 VALOR EXTREMO  — EV acima de 12%"),
+        ("strong",   "✅ VALOR FORTE    — EV entre 7% e 12%"),
+        ("moderate", "📊 VALOR MODERADO — EV entre 3% e 7%"),
+        ("weak",     "➕ VALOR FRACO    — EV entre 0% e 3%"),
+    ]
+
+    for tier_key, tier_title in TIERS:
+        tier_opps = [o for o in all_opportunities if o["ev_tier"] == tier_key]
+        if not tier_opps:
+            continue
+        print(f"║  {tier_title}".ljust(W+1) + "║")
+        print("║" + "─"*W + "║")
+        print(f"║  {'PARTIDA':<26}  {'MERCADO':<16}  {'ODD':>5}  {'MOD%':>5}  {'EV':>7}  ║")
+        print("║" + "─"*W + "║")
+        for o in tier_opps[:12]:
+            match_str = f"{o['h_name'][:10]} x {o['a_name'][:10]}"
+            print(f"║  {match_str:<26}  {o['market']:<16}  {o['odd']:>5.2f}  {o['prob_model']:>4.1f}%  {o['ev_pct']:>+6.1f}%  ║")
+            print(f"║    ⏰ {o['kickoff'][:16]}  Fair: {o['fair_odd']:.2f}  Mercado: {o['prob_market']:.1f}%  {o['stars']}".ljust(W+1) + "║")
+        print("╠" + "═"*W + "╣")
+
+    # ── TOP 3 em destaque ─────────────────────────────────────────────
+    top3 = all_opportunities[:3]
+    print(f"║  🏆 TOP {len(top3)} ENTRADAS RECOMENDADAS DO DIA".ljust(W+1) + "║")
+    print("║" + "─"*W + "║")
+    for i, o in enumerate(top3, 1):
+        kelly_full = max(0.0, ((o["odd"] * o["prob_model"]/100) - 1) / (o["odd"] - 1))
+        stake_half = round(kelly_full * 0.5 * 100, 2)
+        rec_icon = "🟢" if o["ev_tier"] in ("extreme", "strong") else "🟡"
+        print(f"║  {rec_icon} #{i}  {o['h_name'][:13]} x {o['a_name'][:13]}".ljust(W+1) + "║")
+        print(f"║     Mercado : {o['market']}".ljust(W+1) + "║")
+        print(f"║     Odd     : {o['odd']:.2f}  |  Odd Justa: {o['fair_odd']:.2f}  |  Gap: {(o['fair_odd']/o['odd']-1)*100:+.1f}%".ljust(W+1) + "║")
+        print(f"║     Modelo  : {o['prob_model']:.1f}%  |  Mercado: {o['prob_market']:.1f}%  |  EV: {o['ev_pct']:+.1f}%".ljust(W+1) + "║")
+        print(f"║     Stake   : Kelly/2 = {stake_half:.2f}% da banca  |  {o['label']}".ljust(W+1) + "║")
+        print(f"║     Horário : {o['kickoff'][:16]}".ljust(W+1) + "║")
+        if i < len(top3):
+            print("║" + "─"*W + "║")
+
+    print("╠" + "═"*W + "╣")
+    print(f"║  ⚠️  Análise baseada em dados históricos + modelos matemáticos.".ljust(W+1) + "║")
+    print(f"║  Aposte com responsabilidade. Nunca arrisque mais do que pode perder.".ljust(W+1) + "║")
+    print("╚" + "═"*W + "╝")
+
+    # Oferta de registro CLV
+    print("\n💡 Registrar aposta no tracker CLV? (rastreia se bateu o fechamento)")
+    resp = input("   Número da oportunidade (1-3) ou ENTER para pular: ").strip()
+    if resp in ("1","2","3"):
+        idx2 = int(resp) - 1
+        if idx2 < len(top3):
+            o = top3[idx2]
+            bet = register_bet_entry(
+                fixture_id  = o["fixture_id"],
+                market      = o["market"],
+                team        = f"{o['h_name']} x {o['a_name']}",
+                odd_entry   = o["odd"],
+                prob_model  = o["prob_model"] / 100,
+            )
+            print(f"\n✅ Registrado! ID: {bet['bet_id']}")
+            print("   Use 'Registrar Odd de Fechamento' depois do jogo para calcular o CLV.")
+
+    input("\nENTER para voltar.")
+
+
 def _render_pre_game_dashboard(
         h_name, a_name, fixture_id,
         h_id, a_id,
@@ -4582,7 +3619,7 @@ def execute_advanced_pre_live_analysis_v3():
     """Análise pré-jogo V3 PRO — relatório completo com todos os módulos."""
     global selected_match
 
-    execute_advanced_pre_live_analysis_v21()
+    # V3 analysis only — V2.1 removed
 
     h_id        = selected_match["home_id"]
     a_id        = selected_match["away_id"]
