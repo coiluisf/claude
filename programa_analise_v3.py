@@ -1463,26 +1463,64 @@ def calculate_advanced_corners(h_metrics_blended, a_metrics_blended,
                                 h_pressure_idx, a_pressure_idx):
     """
     Modelo avançado de escanteios usando métricas combinadas casa/fora + Pressure Index.
-    Retorna expected corners, probabilidades Over 7.5 até 11.5.
+    Retorna expected corners, probabilidades Over 7.5 até 11.5, e corner_trace.
+    Safety cap: total cannot exceed base_historical * 1.50.
     """
     import math as _math
 
-    h_exp = (
-        h_metrics_blended.get("avg_corners", 5.0) * 0.35
+    # Base historical corners
+    base_h_hist = h_metrics_blended.get("avg_corners", 5.0)
+    base_a_hist = a_metrics_blended.get("avg_corners", 5.0)
+    base_historical = base_h_hist + base_a_hist
+
+    # Pressure adjustment component
+    h_pressure_adj = (h_pressure_idx / 100.0) * 3.0
+    a_pressure_adj = (a_pressure_idx / 100.0) * 3.0
+
+    # Possession adjustment component
+    h_possession_adj = h_metrics_blended.get("avg_possession", 50.0) * 0.02
+    a_possession_adj = a_metrics_blended.get("avg_possession", 50.0) * 0.02
+
+    h_exp_raw = (
+        base_h_hist * 0.35
         + h_metrics_blended.get("avg_shots", 12.0) * 0.15
         + h_metrics_blended.get("avg_sot", 4.0) * 0.20
-        + (h_pressure_idx / 100.0) * 3.0
-        + h_metrics_blended.get("avg_possession", 50.0) * 0.02
+        + h_pressure_adj
+        + h_possession_adj
     )
-    a_exp = (
-        a_metrics_blended.get("avg_corners", 5.0) * 0.35
+    a_exp_raw = (
+        base_a_hist * 0.35
         + a_metrics_blended.get("avg_shots", 12.0) * 0.15
         + a_metrics_blended.get("avg_sot", 4.0) * 0.20
-        + (a_pressure_idx / 100.0) * 3.0
-        + a_metrics_blended.get("avg_possession", 50.0) * 0.02
+        + a_pressure_adj
+        + a_possession_adj
     )
 
+    total_raw = h_exp_raw + a_exp_raw
+
+    # Safety cap: total cannot exceed base_historical * 1.50
+    max_corner_multiplier = 1.50
+    cap_total = base_historical * max_corner_multiplier
+    cap_applied = total_raw > cap_total
+    if cap_applied and total_raw > 0:
+        scale = cap_total / total_raw
+        h_exp = h_exp_raw * scale
+        a_exp = a_exp_raw * scale
+    else:
+        h_exp = h_exp_raw
+        a_exp = a_exp_raw
+
     total_exp = h_exp + a_exp
+
+    # corner_trace for debugging/display
+    corner_trace = {
+        "base_historical":   round(base_historical, 2),
+        "pressure_adj":      round(h_pressure_adj + a_pressure_adj, 2),
+        "possession_adj":    round(h_possession_adj + a_possession_adj, 2),
+        "climate_adj":       0.0,  # reserved for future climate integration
+        "total_expected":    round(total_exp, 2),
+        "max_cap_applied":   cap_applied,
+    }
 
     # Probabilidades via distribuição de Poisson para cada linha
     def poisson_over(lam, line):
@@ -1504,7 +1542,8 @@ def calculate_advanced_corners(h_metrics_blended, a_metrics_blended,
         "a_expected_corners": round(a_exp, 2),
         "total_expected": round(total_exp, 2),
         "corner_pressure": corner_pressure,  # positivo = mandante domina escanteios
-        "probabilities": probs
+        "probabilities": probs,
+        "corner_trace": corner_trace,
     }
 
 
@@ -1843,6 +1882,78 @@ def calculate_ensemble_probability(poisson_probs, mc_probs, ml_probs,
     ensemble["norm_weights"]  = {k: round(v, 3) for k, v in norm_weights.items()}
     ensemble["weights_used"] = {k: round(norm_weights[k], 3) for k in available}
     return ensemble
+
+
+def calculate_consistency_audit(ensemble, mc_probs, poisson_probs, elo_probs,
+                                 ml_probs, api_probs, scenarios):
+    """
+    CORRECTION 4 — Global Consistency Auditor.
+    Collects home_win probability from each model, computes std deviation,
+    flags conflicts between ensemble and scenario #1, returns impact on confidence.
+    """
+    import math as _math
+
+    model_values = {}
+    for name, probs in [
+        ("monte_carlo", mc_probs),
+        ("poisson",     poisson_probs),
+        ("elo",         elo_probs),
+        ("ml",          ml_probs),
+        ("api",         api_probs),
+    ]:
+        if probs and isinstance(probs, dict) and probs.get("home_win") is not None:
+            try:
+                model_values[name] = float(probs["home_win"])
+            except (TypeError, ValueError):
+                pass
+
+    models_used = list(model_values.keys())
+    values = list(model_values.values())
+
+    if len(values) >= 2:
+        mean_val = sum(values) / len(values)
+        variance = sum((v - mean_val) ** 2 for v in values) / len(values)
+        std_dev  = _math.sqrt(variance)
+    elif len(values) == 1:
+        std_dev = 0.0
+    else:
+        std_dev = 0.0
+
+    if std_dev > 0.15:
+        level = "CRÍTICA"
+        impact = -20
+    elif std_dev > 0.10:
+        level = "ALTA"
+        impact = -12
+    elif std_dev > 0.06:
+        level = "MÉDIA"
+        impact = -6
+    else:
+        level = "BAIXA"
+        impact = 0
+
+    conflicts = []
+    if ensemble and scenarios:
+        ens_hw = ensemble.get("home_win", 0)
+        ens_aw = ensemble.get("away_win", 0)
+        sc1 = scenarios[0] if scenarios else None
+        if sc1:
+            sc1_title = sc1.get("title", "")
+            sc1_favors_home = ("Mandante" in sc1_title or "Home" in sc1_title)
+            sc1_favors_away = ("Visitante" in sc1_title or "Away" in sc1_title)
+            ens_favors_home = ens_hw > ens_aw
+            if sc1_favors_home and not ens_favors_home:
+                conflicts.append("Cenário #1 favorece mandante mas ensemble favorece visitante")
+            elif sc1_favors_away and ens_favors_home:
+                conflicts.append("Cenário #1 favorece visitante mas ensemble favorece mandante")
+
+    return {
+        "level":                level,
+        "std_dev":              round(std_dev, 4),
+        "conflicts":            conflicts,
+        "models_used":          models_used,
+        "impact_on_confidence": impact,
+    }
 
 
 # =====================================================================
@@ -2234,38 +2345,76 @@ def calculate_fair_odd(prob_model: float) -> float:
 def build_ev_report(ensemble: dict, all_odds: dict, h_name: str, a_name: str) -> list:
     """
     Compares ensemble probabilities vs market odds for all available markets.
-    Returns list of dicts: {market, prob_model, prob_market, odd, fair_odd, ev, classification}
+    Returns list of dicts: {market, prob_model, prob_market, odd, fair_odd, ev, edge_pct,
+                             classification, kelly_full, kelly_half, kelly_quarter}
+    Covers: 1X2, BTTS, Over/Under 1.5/2.5/3.5, DNB, Double Chance.
     """
     if not ensemble:
         return []
     if not all_odds:
         all_odds = {}
-    report = []
+
+    hw = ensemble.get("home_win", 0) or 0
+    dr = ensemble.get("draw", 0) or 0
+    aw = ensemble.get("away_win", 0) or 0
+
+    # DNB probabilities (renormalized without draw)
+    dnb_denom = hw + aw if (hw + aw) > 0 else 1.0
+    dnb_home_prob = hw / dnb_denom
+    dnb_away_prob = aw / dnb_denom
+
+    # Double Chance probabilities
+    dc_hd_prob = hw + dr   # Home or Draw (1X)
+    dc_ad_prob = aw + dr   # Away or Draw (X2)
+    dc_ha_prob = hw + aw   # Home or Away (12)
+
     market_map = [
-        ("home_win",  all_odds.get("home"),   f"Vitória {h_name}"),
-        ("draw",      all_odds.get("draw"),   "Empate"),
-        ("away_win",  all_odds.get("away"),   f"Vitória {a_name}"),
-        ("btts",      all_odds.get("btts"),   "Ambas Marcam (Sim)"),
-        ("over15",    all_odds.get("over15"), "Mais de 1.5 Gols"),
-        ("over25",    all_odds.get("over25"), "Mais de 2.5 Gols"),
-        ("over35",    all_odds.get("over35"), "Mais de 3.5 Gols"),
-        ("under25",   all_odds.get("under25"),"Menos de 2.5 Gols"),
+        ("home_win",  all_odds.get("home"),     f"Vitória {h_name}",         hw),
+        ("draw",      all_odds.get("draw"),      "Empate",                    dr),
+        ("away_win",  all_odds.get("away"),      f"Vitória {a_name}",         aw),
+        ("btts",      all_odds.get("btts"),      "Ambas Marcam (Sim)",        ensemble.get("btts")),
+        ("over15",    all_odds.get("over15"),    "Mais de 1.5 Gols",          ensemble.get("over15")),
+        ("over25",    all_odds.get("over25"),    "Mais de 2.5 Gols",          ensemble.get("over25")),
+        ("over35",    all_odds.get("over35"),    "Mais de 3.5 Gols",          ensemble.get("over35")),
+        ("under25",   all_odds.get("under25"),   "Menos de 2.5 Gols",         ensemble.get("under25")),
+        ("dnb_home",  all_odds.get("dnb_home"),  f"DNB — {h_name}",           dnb_home_prob),
+        ("dnb_away",  all_odds.get("dnb_away"),  f"DNB — {a_name}",           dnb_away_prob),
+        ("dc_1x",     all_odds.get("dc_1x"),     f"DC Casa/Empate (1X)",      dc_hd_prob),
+        ("dc_x2",     all_odds.get("dc_x2"),     f"DC Empate/Fora (X2)",      dc_ad_prob),
+        ("dc_12",     all_odds.get("dc_12"),     f"DC Casa/Fora (12)",        dc_ha_prob),
     ]
-    for market_key, odd, label in market_map:
-        prob_model = ensemble.get(market_key)
+    report = []
+    for market_key, odd, label, prob_model in market_map:
         if prob_model is None or odd is None:
+            continue
+        if prob_model <= 0:
             continue
         fair_odd = calculate_fair_odd(prob_model)
         ev_data  = calculate_ev_market(prob_model, odd)
+        ev       = ev_data["ev"]
+        # Edge % = (market_odd / fair_odd - 1) * 100
+        edge_pct = ((odd / fair_odd) - 1) * 100 if fair_odd and fair_odd > 0 else 0.0
+        # Kelly criterion — only positive when EV > 0
+        b = odd - 1.0
+        if b > 0 and ev is not None and ev > 0:
+            kelly_full    = max(0.0, ((b * prob_model) - (1.0 - prob_model)) / b)
+            kelly_half    = kelly_full * 0.50
+            kelly_quarter = kelly_full * 0.25
+        else:
+            kelly_full = kelly_half = kelly_quarter = 0.0
         report.append({
-            "market":       market_key,
-            "label":        label,
-            "prob_model":   prob_model,
-            "prob_market":  ev_data["prob_market"],
-            "odd":          odd,
-            "fair_odd":     fair_odd,
-            "ev":           ev_data["ev"],
+            "market":         market_key,
+            "label":          label,
+            "prob_model":     prob_model,
+            "prob_market":    ev_data["prob_market"],
+            "odd":            odd,
+            "fair_odd":       fair_odd,
+            "ev":             ev,
+            "edge_pct":       round(edge_pct, 2),
             "classification": ev_data["classification"],
+            "kelly_full":     round(kelly_full, 4),
+            "kelly_half":     round(kelly_half, 4),
+            "kelly_quarter":  round(kelly_quarter, 4),
         })
     return report
 
@@ -2273,13 +2422,13 @@ def build_ev_report(ensemble: dict, all_odds: dict, h_name: str, a_name: str) ->
 # ── MODULE 2 — FAIR ODDS ENGINE (pre-game) ───────────────────────────
 
 def render_ev_report(ev_report: list, h_name: str, a_name: str, W: int = 70):
-    """Renders the full EV+ report in a visual box."""
+    """Renders the full EV+ report in a visual box, including edge%, Kelly fractions."""
     if not ev_report:
         return
     print("╔" + "═"*W + "╗")
     print(f"║  📈 RELATÓRIO EV+ — VALOR ESPERADO POR MERCADO".ljust(W+1) + "║")
     print("╠" + "═"*W + "╣")
-    header = f"  {'MERCADO':<26} {'PROB MOD':>8} {'PROB MKT':>8} {'FAIR ODD':>9} {'ODD MKT':>8} {'EV%':>7}  CLASSIF"
+    header = f"  {'MERCADO':<26} {'PROB%':>6} {'FAIR':>6} {'ODD':>6} {'EDGE%':>6} {'EV%':>6}"
     print(f"║{header}".ljust(W+1) + "║")
     print("║" + "─"*W + "║")
 
@@ -2287,26 +2436,33 @@ def render_ev_report(ev_report: list, h_name: str, a_name: str, W: int = 70):
     no_value      = [r for r in ev_report if r["ev"] is None or r["ev"] <= 0]
 
     for row in sorted(value_markets, key=lambda x: x["ev"], reverse=True):
-        ev_str = f"{row['ev']*100:>+6.1f}%"
-        pm_str = f"{row['prob_model']*100:.1f}%"
-        pk_str = f"{row['prob_market']*100:.1f}%" if row["prob_market"] else "  N/A "
-        fo_str = f"{row['fair_odd']:.2f}"
-        od_str = f"{row['odd']:.2f}"
-        cl     = row["classification"]
-        line   = f"  {row['label']:<26} {pm_str:>8} {pk_str:>8} {fo_str:>9} {od_str:>8} {ev_str:>7}  {cl['stars']} {cl['label']}"
+        ev_str   = f"{row['ev']*100:>+5.1f}%"
+        pm_str   = f"{row['prob_model']*100:.1f}%"
+        fo_str   = f"{row['fair_odd']:.2f}"
+        od_str   = f"{row['odd']:.2f}"
+        edge_str = f"{row.get('edge_pct', 0):>+5.1f}%"
+        cl       = row["classification"]
+        line = f"  {row['label']:<26} {pm_str:>6} {fo_str:>6} {od_str:>6} {edge_str:>6} {ev_str:>6}  {cl['stars']} {cl['label']}"
         print(f"║{line}".ljust(W+1) + "║")
+        # Kelly line (only when EV > 0)
+        kf = row.get("kelly_full", 0)
+        kh = row.get("kelly_half", 0)
+        kq = row.get("kelly_quarter", 0)
+        if kf > 0:
+            kelly_line = f"     Kelly Full: {kf*100:.1f}%   Kelly 50%: {kh*100:.1f}%   Kelly 25%: {kq*100:.1f}%"
+            print(f"║{kelly_line}".ljust(W+1) + "║")
 
     if value_markets and no_value:
         print("║" + "─"*W + "║")
 
     for row in no_value:
-        ev_str = f"{row['ev']*100:>+6.1f}%" if row["ev"] is not None else "   N/A"
-        pm_str = f"{row['prob_model']*100:.1f}%"
-        pk_str = f"{row['prob_market']*100:.1f}%" if row["prob_market"] else "  N/A "
-        fo_str = f"{row['fair_odd']:.2f}"
-        od_str = f"{row['odd']:.2f}"
-        cl     = row["classification"]
-        line   = f"  {row['label']:<26} {pm_str:>8} {pk_str:>8} {fo_str:>9} {od_str:>8} {ev_str:>7}  {cl['label']}"
+        ev_str   = f"{row['ev']*100:>+5.1f}%" if row["ev"] is not None else "  N/A"
+        pm_str   = f"{row['prob_model']*100:.1f}%"
+        fo_str   = f"{row['fair_odd']:.2f}"
+        od_str   = f"{row['odd']:.2f}"
+        edge_str = f"{row.get('edge_pct', 0):>+5.1f}%"
+        cl       = row["classification"]
+        line = f"  {row['label']:<26} {pm_str:>6} {fo_str:>6} {od_str:>6} {edge_str:>6} {ev_str:>6}  {cl['label']}"
         print(f"║{line}".ljust(W+1) + "║")
 
     print("╚" + "═"*W + "╝")
@@ -2944,17 +3100,25 @@ def recommend_entry(
 
 
 def render_entry_recommendations(recommendations: list, h_name: str, a_name: str, W: int = 70):
-    """Renders entry recommendations panel."""
+    """Renders entry recommendations panel sorted by EV (TOP OPORTUNIDADES)."""
     print("╔" + "═"*W + "╗")
     if recommendations:
-        print(f"║  🎯 ENTRADAS RECOMENDADAS".ljust(W+1) + "║")
+        # Ensure sorted by EV descending (only EV > 0)
+        sorted_recs = sorted(
+            [r for r in recommendations if r.get("ev", 0) > 0],
+            key=lambda x: x["ev"], reverse=True
+        )
+        print(f"║  🎯 TOP OPORTUNIDADES".ljust(W+1) + "║")
         print("╠" + "═"*W + "╣")
-        for rec in recommendations:
-            cl   = rec.get("ev_class", {})
+        for i, rec in enumerate(sorted_recs, 1):
+            cl    = rec.get("ev_class", {})
             stars = cl.get("stars", "")
-            print(f"║  {stars} {rec['entry_type']} — {rec['label']}".ljust(W+1) + "║")
-            print(f"║    Odd: {rec['odd']:.2f}  |  Fair Odd: {rec['fair_odd']:.2f}  |  EV: {rec['ev']*100:>+.1f}%  |  Stake: {rec['stake_pct']*100:.2f}%".ljust(W+1) + "║")
+            conf  = rec.get("confidence", 0)
+            print(f"║  #{i} {rec['label']:<26}  EV: {rec['ev']*100:>+.1f}%   Confiança: {conf:.0f}".ljust(W+1) + "║")
+            print(f"║    {stars} Odd: {rec['odd']:.2f}  |  Fair Odd: {rec['fair_odd']:.2f}  |  Stake: {rec['stake_pct']*100:.2f}%".ljust(W+1) + "║")
             print("║" + "─"*W + "║")
+        if not sorted_recs:
+            print(f"║  ⛔ NENHUMA ENTRADA — EV positivo não encontrado".ljust(W+1) + "║")
     else:
         print(f"║  ⛔ NENHUMA ENTRADA — Critérios EV+ não atingidos".ljust(W+1) + "║")
         print("╠" + "═"*W + "╣")
@@ -3891,9 +4055,31 @@ def generate_scenarios(ensemble, mc, matchup, climate_impact, fatigue_h, fatigue
 
 
 def generate_narrative(scenarios, h_name, a_name, matchup, climate_impact, fatigue_h, fatigue_a, ensemble):
-    """Narrativa detalhada de analista: como o jogo deve se desenvolver."""
+    """Narrativa detalhada de analista: como o jogo deve se desenvolver.
+    Always produces at least 2 sentences even when ensemble is None."""
+    # CORRECTION 9: Never return "Dados insuficientes" — use available data
     if not ensemble:
-        return "Dados insuficientes para gerar narrativa."
+        # Build minimal narrative from scenarios and matchup
+        h_style = (matchup or {}).get("h_style", "Equilibrado")
+        a_style = (matchup or {}).get("a_style", "Equilibrado")
+        sc1_desc = ""
+        if scenarios:
+            sc1 = scenarios[0]
+            sc1_desc = f" O modelo projeta {sc1['title']} ({sc1['prob']*100:.0f}%) como cenário mais provável."
+        clima_note = ""
+        if climate_impact and climate_impact.get("total_penalty", 0) < -0.07:
+            clima_note = f" As condições climáticas adversas (penalidade {climate_impact.get('total_penalty',0):+.2f}) podem influenciar o ritmo."
+        fat_note = ""
+        fat_h_val = fatigue_h or 0
+        fat_a_val = fatigue_a or 0
+        if fat_h_val > 60 or fat_a_val > 60:
+            fat_note = f" Fadiga é fator relevante — {h_name[:14]}: {fat_h_val:.0f}/100, {a_name[:14]}: {fat_a_val:.0f}/100."
+        base = (f"{h_name[:16]} apresenta estilo {h_style}, enquanto {a_name[:16]} joga em {a_style}."
+                + sc1_desc + clima_note + fat_note)
+        if not base.strip():
+            base = (f"Partida entre {h_name[:16]} e {a_name[:16]} sem dados suficientes para análise completa. "
+                    f"Acompanhe as condições do jogo em tempo real.")
+        return base
 
     hw   = ensemble.get("home_win", 0.33)
     aw   = ensemble.get("away_win", 0.33)
@@ -5283,6 +5469,76 @@ def calculate_calibration_curve(predictions, outcomes, n_bins=5):
     return result
 
 
+def calculate_global_confidence(ensemble_conf, data_quality, placeholder_detector,
+                                 lineups, weather, h_hist, a_hist, consistency_audit):
+    """
+    CORRECTION 6 — Unified Confidence Engine.
+    Produces ONE unified score 0-100 from all data sources.
+    Returns dict: {global_score, components}
+    """
+    score = 0.0
+    components = {}
+
+    # Data volume (25 pts max)
+    avg_games = ((len(h_hist) if h_hist else 0) + (len(a_hist) if a_hist else 0)) / 2.0
+    vol_pts = min(25.0, avg_games * 2.5)
+    score += vol_pts
+    components["volume_dados"] = round(vol_pts, 1)
+
+    # Data quality (20 pts)
+    if data_quality:
+        dq_score = data_quality.get("overall_score", data_quality.get("reliability", 50))
+        dq_pts = dq_score * 0.20
+        score += dq_pts
+        components["qualidade_dados"] = round(dq_pts, 1)
+    else:
+        components["qualidade_dados"] = 0.0
+
+    # Model consistency (20 pts) — from consistency_audit
+    consistency_penalty = consistency_audit.get("impact_on_confidence", 0) if consistency_audit else 0
+    cons_pts = max(0.0, 20.0 + consistency_penalty)
+    score += cons_pts
+    components["consistencia_modelos"] = round(cons_pts, 1)
+
+    # Lineups confirmed (15 pts)
+    if lineups and (lineups.get("home") or lineups.get("away") or
+                    (isinstance(lineups, list) and len(lineups) > 0)):
+        score += 15.0
+        components["escalacoes"] = 15.0
+    else:
+        components["escalacoes"] = 0.0
+
+    # Climate data (10 pts)
+    if weather:
+        score += 10.0
+        components["clima"] = 10.0
+    else:
+        components["clima"] = 0.0
+
+    # Placeholders (10 pts)
+    if placeholder_detector:
+        ph_count = placeholder_detector.get("placeholder_count", 5)
+        ph_pts = max(0.0, 10.0 - ph_count * 2.0)
+        score += ph_pts
+        components["placeholders"] = round(ph_pts, 1)
+    else:
+        score += 5.0
+        components["placeholders"] = 5.0
+
+    # Ensemble convergence (up to 10 pts via ensemble_conf score)
+    if ensemble_conf:
+        ens_pts = ensemble_conf.get("score", 50) * 0.10
+        score += ens_pts
+        components["ensemble_convergencia"] = round(ens_pts, 1)
+    else:
+        components["ensemble_convergencia"] = 0.0
+
+    return {
+        "global_score": round(min(100.0, score), 1),
+        "components":   components,
+    }
+
+
 def calculate_backtest_professional(store=None):
     """
     Extends calculate_backtest_metrics with Brier Score, Log Loss,
@@ -5752,6 +6008,8 @@ def _render_calibration_panels(
         placeholder_detector=None,
         ev_validation=None,
         explainability_total=None,
+        consistency_audit=None,
+        global_confidence=None,
         h_name="Casa", a_name="Fora",
         W=70):
     """Renders all FASE DE CALIBRAÇÃO PROFISSIONAL panels."""
@@ -5920,7 +6178,58 @@ def _render_calibration_panels(
         if lam_a:
             _row(f"λ {a_name[:12]}: xG={lam_a.get('xG_proprio',0):.3f} → λ_final={lam_a.get('lambda_final',0):.3f}")
 
+    # ── CONSISTENCY AUDIT (Correction 4) ─────────────────────────────
+    if consistency_audit:
+        _section("🔍 AUDITOR DE CONSISTÊNCIA GLOBAL")
+        level = consistency_audit.get("level", "?")
+        std   = consistency_audit.get("std_dev", 0)
+        imp   = consistency_audit.get("impact_on_confidence", 0)
+        mods  = ", ".join(consistency_audit.get("models_used", []))
+        level_icon = {"CRÍTICA": "🔴", "ALTA": "🟠", "MÉDIA": "🟡", "BAIXA": "🟢"}.get(level, "⚪")
+        _row(f"{level_icon} Nível: {level}  |  σ home_win: {std*100:.1f}%  |  Impacto confiança: {imp:+d}pts")
+        _row(f"Modelos usados: {mods or 'N/D'}")
+        for conf_msg in (consistency_audit.get("conflicts") or []):
+            _row(f"  ⚠️  {conf_msg[:65]}")
+        if not consistency_audit.get("conflicts"):
+            _row("  ✅ Sem conflitos detectados entre ensemble e cenários")
+
+    # ── GLOBAL CONFIDENCE (Correction 6) ─────────────────────────────
+    if global_confidence:
+        _section("🎯 CONFIANÇA GLOBAL UNIFICADA")
+        gs = global_confidence.get("global_score", 0)
+        bar = "█" * int(gs // 5) + "░" * (20 - int(gs // 5))
+        _row(f"Confiança Global: {gs:.1f}/100  [{bar}]")
+        _sep()
+        for comp_name, comp_val in (global_confidence.get("components") or {}).items():
+            _row(f"  {comp_name:<26}  {comp_val:>5.1f} pts")
+
     print("╚" + "═" * W + "╝")
+
+
+def _is_valid_api_pred(api_pred):
+    """
+    CORRECTION 8 — API Prediction Sanitizer.
+    Returns False if api_pred is empty/zeroed, skipping section in render.
+    """
+    if not api_pred:
+        return False
+    try:
+        ph = float(str(api_pred.get("percent_home", "0")).replace("%", "") or 0)
+        pd = float(str(api_pred.get("percent_draw", "0")).replace("%", "") or 0)
+        pa = float(str(api_pred.get("percent_away", "0")).replace("%", "") or 0)
+    except (TypeError, ValueError):
+        return False
+    if ph == 0 and pd == 0 and pa == 0:
+        return False
+    comp = api_pred.get("comparison", {}) or {}
+    try:
+        att = comp.get("att", {}) or {}
+        atk_h = float(str(att.get("home", "0")).replace("%", "") or 0) if att else 0
+    except (TypeError, ValueError):
+        atk_h = 0
+    if atk_h == 0 and ph == 0:
+        return False
+    return True
 
 
 def _render_pre_game_dashboard(
@@ -5977,6 +6286,8 @@ def _render_pre_game_dashboard(
         placeholder_detector=None,
         ev_validation=None,
         explainability_total=None,
+        global_confidence=None,
+        consistency_audit=None,
         W=70):
     """Renderiza toda a análise pré-jogo em formato visual profissional."""
 
@@ -6151,6 +6462,13 @@ def _render_pre_game_dashboard(
         f"{'🟢' if p>0.60 else ('🟡' if p>0.40 else '🔴')} Over {k}: {p*100:.0f}%"
         for k, p in over_items
     ))
+    # Corner Trace (Correction 7)
+    ct = adv_corners.get("corner_trace")
+    if ct:
+        _sep()
+        _row(f"Corner Trace — Base histórico: {ct['base_historical']}  |  Pressão: {ct['pressure_adj']:+.2f}  |  Posse: {ct['possession_adj']:+.2f}")
+        cap_note = "  ⚠️ CAP 1.50x APLICADO" if ct.get("max_cap_applied") else ""
+        _row(f"Total projetado: {ct['total_expected']}{cap_note}")
 
     # ── ÁRBITRO ───────────────────────────────────────────────────────
     _section("🟨 ÁRBITRO")
@@ -6164,7 +6482,7 @@ def _render_pre_game_dashboard(
         _row("Árbitro não divulgado.")
 
     # ── PREDIÇÃO NATIVA DA API-FOOTBALL ──────────────────────────────
-    if api_pred:
+    if _is_valid_api_pred(api_pred):
         _section("🔮 PREDIÇÃO NATIVA — API-FOOTBALL")
         _row(f"💬 Conselho: {api_pred['advice']}")
         _row(f"🏆 Vencedor previsto: {api_pred['winner_name']}  |  {api_pred['winner_comment']}")
@@ -6240,7 +6558,8 @@ def _render_pre_game_dashboard(
     # ── VEREDICTO FINAL ───────────────────────────────────────────────
     if ensemble:
         print("╠" + "═"*W + "╣")
-        print(f"║  🏆 VEREDICTO FINAL — ENSEMBLE V3  (Confiança: {conf['score']}/100 — {conf['label']})".ljust(W+1) + "║")
+        gc_str = f"   |   Confiança Global: {global_confidence['global_score']}/100" if global_confidence else ""
+        print(f"║  🏆 VEREDICTO FINAL — ENSEMBLE V3  (Confiança: {conf['score']}/100 — {conf['label']}{gc_str})".ljust(W+1) + "║")
         print("║" + "═"*W + "║")
         _row(f"{'MERCADO':<26}  {'PROB':>5}  {'':^12}  {'RECOMENDAÇÃO':<18}  {'EV':>7}")
         _sep()
@@ -6610,6 +6929,8 @@ def _render_pre_game_dashboard(
             placeholder_detector=placeholder_detector,
             ev_validation=ev_validation,
             explainability_total=explainability_total,
+            consistency_audit=consistency_audit,
+            global_confidence=global_confidence,
             h_name=h_name, a_name=a_name, W=W,
         )
 
@@ -6926,6 +7247,23 @@ def execute_advanced_pre_live_analysis_v3():
         api_probs=_api_probs,
     )
 
+    # Rebuild EV report now that ensemble is finalized
+    ev_report = build_ev_report(ensemble, all_odds, h_name, a_name)
+    if real_odds and ensemble:
+        for side, odd_key in [("home_win","home"), ("draw","draw"), ("away_win","away")]:
+            odd = real_odds.get(odd_key)
+            if odd:
+                ev_final[odd_key] = (ensemble.get(side, 0) * odd) - 1.0
+
+    # ── CONSISTENCY AUDIT & GLOBAL CONFIDENCE (Corrections 4 & 6) ────
+    print("  ▸ Consistency Audit...")
+    consistency_audit_v6 = calculate_consistency_audit(
+        ensemble, mc_probs, xg_model_probs,
+        {"home_win": elo_probs["home_win"], "draw": elo_probs["draw"], "away_win": elo_probs["away_win"]},
+        ml_probs, _api_probs, scenarios_v5,
+    )
+    print(f"     Consistência: {consistency_audit_v6['level']}  σ={consistency_audit_v6['std_dev']:.3f}  impacto={consistency_audit_v6['impact_on_confidence']:+d}pts")
+
     # ── FASE DE CALIBRAÇÃO PROFISSIONAL ──────────────────────────────
     print("  ▸ CALIB — Model Auditor...")
     model_audit_v6 = calculate_model_audit(
@@ -6970,6 +7308,19 @@ def execute_advanced_pre_live_analysis_v3():
         detailed_h=detailed_h, detailed_a=detailed_a,
         h_hist=h_hist, a_hist=a_hist,
     )
+
+    print("  ▸ CALIB — Global Confidence (Unified)...")
+    global_confidence_v6 = calculate_global_confidence(
+        ensemble_conf=confidence_v2_v6,
+        data_quality=data_quality_v5,
+        placeholder_detector=placeholder_detector_v6,
+        lineups=lineups,
+        weather=weather,
+        h_hist=h_hist,
+        a_hist=a_hist,
+        consistency_audit=consistency_audit_v6,
+    )
+    print(f"     Confiança Global: {global_confidence_v6['global_score']}/100")
 
     print("  ▸ CALIB — Backtest Profissional (Brier + LogLoss)...")
     backtest_pro_v6 = calculate_backtest_professional()
@@ -7085,6 +7436,8 @@ def execute_advanced_pre_live_analysis_v3():
         placeholder_detector=placeholder_detector_v6,
         ev_validation=ev_validation_v6,
         explainability_total=explainability_total_v6,
+        global_confidence=global_confidence_v6,
+        consistency_audit=consistency_audit_v6,
     )
 
     input("\nPressione ENTER para retornar ao menu da partida...")
