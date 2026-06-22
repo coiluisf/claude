@@ -3575,11 +3575,17 @@ def calculate_advanced_climate_impact(weather):
     if not weather:
         return None
 
-    temp_c = weather.get("temp_c", 20)
-    humidity = weather.get("humidity", 60)
-    wind_kmph = weather.get("wind_kmph", 10)
-    precip_mm = weather.get("precip_mm", 0)
-    uv = weather.get("uv", 3)
+    def _to_float(val, default=0):
+        try:
+            return float(str(val).lstrip("-")) * (-1 if str(val).startswith("-") else 1)
+        except Exception:
+            return default
+
+    temp_c    = _to_float(weather.get("temp_c",   20), 20)
+    humidity  = _to_float(weather.get("humidity", 60), 60)
+    wind_kmph = _to_float(weather.get("wind_kmph", 10), 10)
+    precip_mm = _to_float(weather.get("precip_mm",  0),  0)
+    uv        = _to_float(weather.get("uv",          3),  3)
 
     # Penalidades (negativo = reduz, positivo = aumenta)
     heat_penalty = 0.0
