@@ -2854,6 +2854,11 @@ def calculate_ensemble_probability(poisson_probs, mc_probs, ml_probs,
 # HELPERS PRÉ-JOGO V3
 # =====================================================================
 
+
+# =====================================================================
+# HELPERS PRÉ-JOGO V3  (dados enriquecidos + clima)
+# =====================================================================
+
 def _fetch_real_general_stats(hist, team_id, n=10):
     """Busca estatísticas reais dos últimos N jogos para o blend geral."""
     import requests as _req
@@ -2884,17 +2889,17 @@ def _fetch_real_general_stats(hist, team_id, n=10):
             pass
     avg = lambda l, fb: round(sum(l)/len(l), 2) if l else fb
     return {
-        "avg_gf":        avg(gf_l,    1.2),
-        "avg_gc":        avg(gc_l,    1.0),
-        "avg_shots":     avg(shots_l, 12.0),
-        "avg_sot":       avg(sot_l,   4.5),
+        "avg_gf":        avg(gf_l,     1.2),
+        "avg_gc":        avg(gc_l,     1.0),
+        "avg_shots":     avg(shots_l,  12.0),
+        "avg_sot":       avg(sot_l,    4.5),
         "avg_corners":   avg(corners_l, 5.0),
-        "avg_poss_calc": avg(poss_l,  50.0),
+        "avg_poss_calc": avg(poss_l,   50.0),
     }
 
 
 def _format_recent_form(hist, team_id, n=5):
-    """Retorna lista de dicts com forma recente: resultado, placar, adversário."""
+    """Retorna lista com os últimos N resultados: resultado, placar, adversário."""
     results = []
     for f in hist[:n]:
         is_home = int(f["teams"]["home"]["id"]) == int(team_id)
@@ -2912,11 +2917,12 @@ def _format_recent_form(hist, team_id, n=5):
             "gc":    gc,
             "opp":   opp[:16],
             "venue": "Casa" if is_home else "Fora",
+            "date":  f["fixture"]["date"][:10],
         })
     return results
 
 
-def _fetch_h2h_summary(h_id, a_id, n=5):
+def _fetch_h2h_summary(h_id, a_id, n=8):
     """Busca últimos N confrontos diretos entre os dois times."""
     try:
         res = requests.get(
@@ -2927,6 +2933,256 @@ def _fetch_h2h_summary(h_id, a_id, n=5):
         return res.get("response", [])
     except Exception:
         return []
+
+
+def _fetch_fixture_lineups(fixture_id):
+    """Busca escalações e formações já divulgadas."""
+    try:
+        res = requests.get(
+            f"{BASE_URL}/fixtures/lineups",
+            headers=headers,
+            params={"fixture": fixture_id}
+        ).json()
+        return res.get("response", [])
+    except Exception:
+        return []
+
+
+def _fetch_api_predictions(fixture_id):
+    """Busca as predições nativas da API-Football para a partida."""
+    try:
+        res = requests.get(
+            f"{BASE_URL}/predictions",
+            headers=headers,
+            params={"fixture": fixture_id}
+        ).json()
+        data = res.get("response", [])
+        if not data:
+            return None
+        p = data[0]
+        pred  = p.get("predictions", {})
+        comp  = p.get("comparison", {})
+        teams = p.get("teams", {})
+        win   = pred.get("winner", {})
+        return {
+            "winner_name":    win.get("name", "?"),
+            "winner_comment": win.get("comment", ""),
+            "advice":         pred.get("advice", ""),
+            "goals_h":        pred.get("goals", {}).get("home", "?"),
+            "goals_a":        pred.get("goals", {}).get("away", "?"),
+            "percent_home":   pred.get("percent", {}).get("home", "?"),
+            "percent_draw":   pred.get("percent", {}).get("draw", "?"),
+            "percent_away":   pred.get("percent", {}).get("away", "?"),
+            "comp_att_h":     comp.get("att", {}).get("home", "?"),
+            "comp_att_a":     comp.get("att", {}).get("away", "?"),
+            "comp_def_h":     comp.get("def", {}).get("home", "?"),
+            "comp_def_a":     comp.get("def", {}).get("away", "?"),
+            "comp_form_h":    comp.get("form", {}).get("home", "?"),
+            "comp_form_a":    comp.get("form", {}).get("away", "?"),
+            "comp_poisson_h": comp.get("poisson_distribution", {}).get("home", "?"),
+            "comp_poisson_a": comp.get("poisson_distribution", {}).get("away", "?"),
+            "h_last5_w":  teams.get("home", {}).get("last_5", {}).get("wins", "?"),
+            "h_last5_d":  teams.get("home", {}).get("last_5", {}).get("draws", "?"),
+            "h_last5_l":  teams.get("home", {}).get("last_5", {}).get("loses", "?"),
+            "h_last5_gf": teams.get("home", {}).get("last_5", {}).get("goals", {}).get("for", {}).get("average", "?"),
+            "h_last5_ga": teams.get("home", {}).get("last_5", {}).get("goals", {}).get("against", {}).get("average", "?"),
+            "a_last5_w":  teams.get("away", {}).get("last_5", {}).get("wins", "?"),
+            "a_last5_d":  teams.get("away", {}).get("last_5", {}).get("draws", "?"),
+            "a_last5_l":  teams.get("away", {}).get("last_5", {}).get("loses", "?"),
+            "a_last5_gf": teams.get("away", {}).get("last_5", {}).get("goals", {}).get("for", {}).get("average", "?"),
+            "a_last5_ga": teams.get("away", {}).get("last_5", {}).get("goals", {}).get("against", {}).get("average", "?"),
+        }
+    except Exception:
+        return None
+
+
+def _fetch_team_standings(team_id, league_id, season):
+    """Busca posição completa do time na tabela."""
+    try:
+        res = requests.get(
+            f"{BASE_URL}/standings",
+            headers=headers,
+            params={"league": league_id, "season": season, "team": team_id}
+        ).json()
+        data = res.get("response", [])
+        if not data:
+            return None
+        for group in data[0]["league"]["standings"]:
+            for row in group:
+                if int(row["team"]["id"]) == int(team_id):
+                    a  = row.get("all",  {})
+                    hm = row.get("home", {})
+                    aw = row.get("away", {})
+                    return {
+                        "rank":    row["rank"],
+                        "points":  row["points"],
+                        "gd":      row["goalsDiff"],
+                        "form":    row.get("form", ""),
+                        "played":  a.get("played", 0),
+                        "won":     a.get("win",    0),
+                        "drawn":   a.get("draw",   0),
+                        "lost":    a.get("lose",   0),
+                        "gf":      a.get("goals", {}).get("for",     0),
+                        "ga":      a.get("goals", {}).get("against", 0),
+                        "home_w":  hm.get("win",  0),
+                        "home_d":  hm.get("draw", 0),
+                        "home_l":  hm.get("lose", 0),
+                        "away_w":  aw.get("win",  0),
+                        "away_d":  aw.get("draw", 0),
+                        "away_l":  aw.get("lose", 0),
+                        "group":       row.get("group",       ""),
+                        "description": row.get("description", ""),
+                    }
+        return None
+    except Exception:
+        return None
+
+
+def _fetch_top_players(team_id, season, league_id):
+    """Busca artilheiros e assistentes do time na temporada."""
+    try:
+        res = requests.get(
+            f"{BASE_URL}/players",
+            headers=headers,
+            params={"team": team_id, "season": season, "league": league_id}
+        ).json()
+        parsed = []
+        for p in res.get("response", []):
+            pl = p.get("player", {})
+            st = p.get("statistics", [{}])[0]
+            gs = st.get("goals",  {})
+            gm = st.get("games",  {})
+            parsed.append({
+                "name":     pl.get("name", "?"),
+                "goals":    gs.get("total")       or 0,
+                "assists":  gs.get("assists")      or 0,
+                "apps":     gm.get("appearences") or 0,
+                "rating":   gm.get("rating")       or "N/A",
+                "position": gm.get("position")     or "?",
+            })
+        return sorted(parsed, key=lambda x: (x["goals"], x["assists"]), reverse=True)[:7]
+    except Exception:
+        return []
+
+
+def _fetch_weather(city, match_datetime_str=None):
+    """Previsão do tempo via wttr.in (gratuito, sem chave de API)."""
+    try:
+        res = requests.get(
+            f"https://wttr.in/{city.replace(' ', '+')}?format=j1",
+            timeout=8,
+            headers={"User-Agent": "curl/7.68.0"}
+        ).json()
+        cur = res.get("current_condition", [{}])[0]
+        desc      = cur.get("weatherDesc", [{}])[0].get("value", "?")
+        temp_c    = cur.get("temp_C",           "?")
+        feels     = cur.get("FeelsLikeC",       "?")
+        humidity  = cur.get("humidity",         "?")
+        wind_kmph = cur.get("windspeedKmph",    "?")
+        wind_dir  = cur.get("winddir16Point",   "?")
+        precip    = cur.get("precipMM",         "?")
+        uv        = cur.get("uvIndex",          "?")
+        vis       = cur.get("visibility",       "?")
+        cloud     = cur.get("cloudcover",       "?")
+
+        desc_l = desc.lower()
+        if any(x in desc_l for x in ["thunder", "trovão"]):   icon = "⛈️"
+        elif any(x in desc_l for x in ["rain","chuva","drizzle"]): icon = "🌧️"
+        elif any(x in desc_l for x in ["snow","neve"]):        icon = "❄️"
+        elif any(x in desc_l for x in ["cloud","nublado","overcast"]): icon = "☁️"
+        elif any(x in desc_l for x in ["fog","mist","neblina"]): icon = "🌫️"
+        else:                                                   icon = "☀️"
+
+        wind_v   = int(wind_kmph)              if str(wind_kmph).isdigit() else 0
+        precip_v = float(precip)               if str(precip).replace(".","").isdigit() else 0
+        temp_v   = int(str(temp_c).lstrip("-")) if str(temp_c).lstrip("-").isdigit() else 20
+        cloud_v  = int(cloud)                  if str(cloud).isdigit() else 0
+
+        impacts = []
+        if wind_v >= 40:
+            impacts.append(f"⚠️ VENTO FORTE ({wind_kmph}km/h) — bolas aéreas e chutes longos prejudicados")
+        elif wind_v >= 25:
+            impacts.append(f"📌 Vento moderado ({wind_kmph}km/h) — pode afetar cruzamentos e bolas longas")
+        if precip_v >= 5:
+            impacts.append(f"🌧️ CHUVA INTENSA ({precip}mm) — campo escorregadio, mais faltas e erros técnicos")
+        elif precip_v > 0:
+            impacts.append(f"🌦️ Chuva leve ({precip}mm) — campo úmido, jogo tende a ser mais rápido")
+        if temp_v >= 32:
+            impacts.append(f"🥵 CALOR INTENSO ({temp_c}°C) — fadiga física acelerada, 2º tempo crítico")
+        elif temp_v <= 5:
+            impacts.append(f"🥶 FRIO INTENSO ({temp_c}°C) — músculos tensos, risco de lesão muscular maior")
+        if cloud_v >= 90 and precip_v == 0:
+            impacts.append("☁️ Muito nublado mas sem chuva — visibilidade levemente reduzida")
+        if not impacts:
+            impacts.append("✅ Condições ideais — sem fatores climáticos adversos esperados")
+
+        hourly = []
+        for h in res.get("weather", [{}])[0].get("hourly", [])[:6]:
+            hourly.append({
+                "time":   h.get("time", "0"),
+                "temp":   h.get("tempC", "?"),
+                "precip": h.get("precipMM", "0"),
+                "desc":   h.get("weatherDesc", [{}])[0].get("value", "?"),
+            })
+
+        return {
+            "city": city, "icon": icon, "desc": desc,
+            "temp_c": temp_c, "feels_like": feels,
+            "humidity": humidity, "wind_kmph": wind_kmph, "wind_dir": wind_dir,
+            "precip_mm": precip, "uv": uv, "visibility": vis, "cloud": cloud,
+            "impacts": impacts, "forecast": hourly,
+        }
+    except Exception:
+        return None
+
+
+def _fetch_venue_info(raw_fixture):
+    """Extrai informações do estádio do fixture."""
+    try:
+        venue = raw_fixture.get("fixture", {}).get("venue", {})
+        return {
+            "name":     venue.get("name",     "?"),
+            "city":     venue.get("city",     "?"),
+            "capacity": venue.get("capacity") or "N/A",
+        }
+    except Exception:
+        return {"name": "?", "city": "?", "capacity": "N/A"}
+
+
+def _fetch_all_odds_markets(fixture_id, base_odds):
+    """Agrega múltiplos mercados de odds da API."""
+    result = {}
+    if base_odds:
+        result.update({"home": base_odds.get("home"), "draw": base_odds.get("draw"), "away": base_odds.get("away")})
+    bet_configs = [
+        (8,  "Both Teams Score",    {"btts_yes": "Yes",     "btts_no": "No"}),
+        (5,  "Goals Over/Under",    {"over15": "Over 1.5",  "over25": "Over 2.5", "over35": "Over 3.5",
+                                     "under25": "Under 2.5"}),
+        (2,  "Double Chance",       {"dc_1x": "Home/Draw",  "dc_x2": "Draw/Away", "dc_12": "Home/Away"}),
+        (13, "HT Result",           {"ht_home": "Home",     "ht_draw": "Draw",    "ht_away": "Away"}),
+        (7,  "Draw No Bet",         {"dnb_home": "Home",    "dnb_away": "Away"}),
+        (45, "1st Half Goals",      {"htou15": "Over 1.5",  "htou05": "Over 0.5"}),
+        (25, "Asian Handicap",      {}),
+    ]
+    for bet_id, bet_name, key_map in bet_configs:
+        try:
+            res = requests.get(
+                f"{BASE_URL}/odds",
+                headers=headers,
+                params={"fixture": fixture_id, "bet": bet_id}
+            ).json()
+            for bk in (res.get("response") or [{}])[0].get("bookmakers", []):
+                for bet in bk.get("bets", []):
+                    if bet.get("name") == bet_name:
+                        odds_dict = {v["value"]: float(v["odd"]) for v in bet.get("values", [])}
+                        for result_key, api_val in key_map.items():
+                            if api_val in odds_dict:
+                                result[result_key] = odds_dict[api_val]
+                        break
+                break
+        except Exception:
+            pass
+    return result
 
 
 def _render_pre_game_dashboard(
@@ -2942,6 +3198,15 @@ def _render_pre_game_dashboard(
         ensemble, conf,
         ev_final,
         xg_lh, xg_la,
+        h_standing=None, a_standing=None,
+        h_players=None, a_players=None,
+        lineups=None,
+        api_pred=None,
+        weather=None,
+        venue=None,
+        all_odds=None,
+        match_datetime=None,
+        league_name=None,
         W=70):
     """Renderiza toda a análise pré-jogo em formato visual profissional."""
 
@@ -2958,33 +3223,78 @@ def _render_pre_game_dashboard(
         print(f"║  {title}".ljust(W+1) + "║")
         _sep()
 
+    # ── HEADER ───────────────────────────────────────────────────────
     print("╔" + "═"*W + "╗")
-    print(f"║  ⚽  ANÁLISE PRÉ-JOGO V3 PRO  —  {h_name} x {a_name}".ljust(W+1) + "║")
-    print(f"║  🆔 Fixture ID: {fixture_id}".ljust(W+1) + "║")
+    print(f"║  ⚽  ANÁLISE PRÉ-JOGO V3 PRO".ljust(W+1) + "║")
+    print(f"║  {h_name}  x  {a_name}".ljust(W+1) + "║")
+    if match_datetime:
+        _row(f"📅 {match_datetime[:16]}  —  {league_name or 'Liga não identificada'}")
+    if venue and venue.get("name") and venue["name"] != "?":
+        _row(f"🏟️  {venue['name']}, {venue['city']}  |  Capacidade: {venue['capacity']}")
 
-    # ── FORMA RECENTE ────────────────────────────────────────────────
+    # ── CLIMA ─────────────────────────────────────────────────────────
+    if weather:
+        _section(f"{weather['icon']} CONDIÇÕES CLIMÁTICAS — {weather['city']}")
+        _row(f"{weather['desc']}  |  {weather['temp_c']}°C  (sensação {weather['feels_like']}°C)")
+        _row(f"💨 Vento: {weather['wind_kmph']}km/h {weather['wind_dir']}  |  💧 Precip: {weather['precip_mm']}mm  |  ☁️ Nuvens: {weather['cloud']}%")
+        _row(f"💦 Umidade: {weather['humidity']}%  |  👁️ Visib.: {weather['visibility']}km  |  ☀️ UV: {weather['uv']}")
+        _sep()
+        for imp in weather["impacts"]:
+            _row(imp)
+        if weather.get("forecast"):
+            _sep()
+            _row("Previsão hora a hora:")
+            buf = ""
+            for h in weather["forecast"]:
+                hh = str(int(h["time"])//100).zfill(2) + "h"
+                buf += f"  {hh}: {h['temp']}°C {h['desc'][:10]:<10}"
+            _row(buf.strip())
+
+    # ── CLASSIFICAÇÃO ─────────────────────────────────────────────────
+    if h_standing or a_standing:
+        _section("📊 CLASSIFICAÇÃO")
+        _row(f"{'CLUBE':<24}  {'#':>3}  {'P':>3}  {'J':>3}  {'V':>3}  {'E':>3}  {'D':>3}  {'GF':>4}  {'GC':>4}  {'SG':>4}")
+        _sep()
+        for name, st in [(h_name, h_standing), (a_name, a_standing)]:
+            if st:
+                _row(f"{name[:24]:<24}  {st['rank']:>3}  {st['points']:>3}  {st['played']:>3}  {st['won']:>3}  {st['drawn']:>3}  {st['lost']:>3}  {st['gf']:>4}  {st['ga']:>4}  {st['gd']:>+4}")
+                form_icons = "".join(
+                    "🟢" if r == "W" else ("🟡" if r == "D" else "🔴")
+                    for r in (st.get("form") or "")[-5:]
+                )
+                _row(f"   Forma liga: {form_icons}  |  Casa {st['home_w']}V/{st['home_d']}E/{st['home_l']}D  |  Fora {st['away_w']}V/{st['away_d']}E/{st['away_l']}D")
+                if st.get("description"):
+                    _row(f"   → {st['description'][:55]}")
+
+    # ── FORMA RECENTE ─────────────────────────────────────────────────
     _section("📋 FORMA RECENTE (últimos 5 jogos)")
     for name, form in [(h_name, h_form), (a_name, a_form)]:
-        icons = "  ".join(f"{res_icon.get(g['res'],'⚪')}{g['res']}" for g in form)
-        _row(f"{name[:22]:<22}  {icons}")
+        icons = "   ".join(f"{res_icon.get(g['res'],'⚪')} {g['gf']}-{g['gc']}" for g in form)
+        _row(f"{name[:20]:<20}  {icons}")
         for g in form:
-            _row(f"   vs {g['opp']:<16} [{g['venue']}]  {g['gf']}-{g['gc']}")
+            _row(f"   {g['date']}  vs {g['opp']:<17} [{g['venue']}]  {g['gf']}-{g['gc']}  {res_icon.get(g['res'],'⚪')}")
         if name == h_name:
             _sep()
 
-    # ── H2H ─────────────────────────────────────────────────────────
+    # ── H2H ──────────────────────────────────────────────────────────
     if h2h_list:
         _section(f"⚔️  CONFRONTO DIRETO — últimos {len(h2h_list)} jogos")
-        h_w = a_w = dr = 0
+        h_w = a_w = dr = gf_t = gc_t = 0
         for f in h2h_list:
             gh = f["goals"].get("home") or 0
             ga = f["goals"].get("away") or 0
             date = f["fixture"]["date"][:10]
-            hn = f["teams"]["home"]["name"][:14]
-            an = f["teams"]["away"]["name"][:14]
-            winner = "━" if gh == ga else ("◀" if gh > ga else "▶")
-            _row(f"{date}  {hn:<14} {gh}-{ga} {an:<14}  {winner}")
-            if int(f["teams"]["home"]["id"]) == int(h_id):
+            hn   = f["teams"]["home"]["name"][:14]
+            an   = f["teams"]["away"]["name"][:14]
+            fid_h = int(f["teams"]["home"]["id"])
+            is_h  = fid_h == int(h_id)
+            gf = gh if is_h else ga
+            gc = ga if is_h else gh
+            gf_t += gf; gc_t += gc
+            win_icon = "━" if gh == ga else ("◀" if gh > ga else "▶")
+            mark = "🟢" if (is_h and gh > ga) or (not is_h and ga > gh) else ("🟡" if gh == ga else "🔴")
+            _row(f"{mark} {date}  {hn:<14} {gh}-{ga} {an:<14}  {win_icon}")
+            if is_h:
                 if gh > ga: h_w += 1
                 elif gh == ga: dr += 1
                 else: a_w += 1
@@ -2992,112 +3302,210 @@ def _render_pre_game_dashboard(
                 if ga > gh: h_w += 1
                 elif gh == ga: dr += 1
                 else: a_w += 1
+        n  = len(h2h_list)
         _sep()
-        _row(f"{h_name[:16]} venceu: {h_w}  |  Empates: {dr}  |  {a_name[:16]} venceu: {a_w}")
+        _row(f"🟢 {h_name[:14]}: {h_w}V  🟡 Empates: {dr}  🔴 {a_name[:14]}: {a_w}  (total {n} jogos)")
+        _row(f"Média gols H2H: {h_name[:10]} {gf_t/n:.2f}/j  |  {a_name[:10]} {gc_t/n:.2f}/j  |  Total: {(gf_t+gc_t)/n:.2f} gols/j")
 
-    # ── ELO ─────────────────────────────────────────────────────────
+    # ── ESCALAÇÕES ───────────────────────────────────────────────────
+    if lineups:
+        _section("👕 ESCALAÇÕES (divulgadas)")
+        for tl in lineups[:2]:
+            tname = tl.get("team", {}).get("name", "?")[:22]
+            form  = tl.get("formation", "?")
+            coach = tl.get("coach", {}).get("name", "?")[:20]
+            _row(f"{tname:<22}  Formação: {form}  |  Técnico: {coach}")
+            starters = [p["player"]["name"][:18] for p in tl.get("startXI", [])]
+            for i in range(0, len(starters), 3):
+                chunk = starters[i:i+3]
+                _row("   " + "   ".join(f"{i+j+1:2}. {n:<18}" for j, n in enumerate(chunk)))
+            _sep()
+
+    # ── JOGADORES-CHAVE ───────────────────────────────────────────────
+    if h_players or a_players:
+        _section("⭐ JOGADORES-CHAVE / ARTILHEIROS")
+        _row(f"{'JOGADOR':<22}  {'TIME':<16}  {'POS':<5}  {'J':>4}  {'G':>4}  {'A':>4}  {'NOTA':>6}")
+        _sep()
+        for plist, tname in [(h_players or [], h_name), (a_players or [], a_name)]:
+            for p in plist[:5]:
+                _row(f"{p['name'][:22]:<22}  {tname[:16]:<16}  {p['position'][:5]:<5}  {p['apps']:>4}  {p['goals']:>4}  {p['assists']:>4}  {str(p['rating'])[:6]:>6}")
+
+    # ── ELO ──────────────────────────────────────────────────────────
     _section("♟️  ELO RATING")
-    _row(f"{h_name[:26]:<26}  ELO: {h_elo['elo']:>4}  Tend: {h_elo['trend']:+.1f}  ({h_elo['games']} jogos)")
-    _row(f"{a_name[:26]:<26}  ELO: {a_elo['elo']:>4}  Tend: {a_elo['trend']:+.1f}  ({a_elo['games']} jogos)")
-    _row(f"Prob ELO: V.Mandante {elo_probs['home_win']*100:.1f}%  |  Empate {elo_probs['draw']*100:.1f}%  |  V.Visit. {elo_probs['away_win']*100:.1f}%")
+    _row(f"{h_name[:28]:<28}  ELO: {h_elo['elo']:>4}  Tend: {h_elo['trend']:+.1f}  ({h_elo['games']} jogos)")
+    _row(f"{a_name[:28]:<28}  ELO: {a_elo['elo']:>4}  Tend: {a_elo['trend']:+.1f}  ({a_elo['games']} jogos)")
+    _row(f"Vitória Mand.: {elo_probs['home_win']*100:.1f}%  |  Empate: {elo_probs['draw']*100:.1f}%  |  Vitória Visit.: {elo_probs['away_win']*100:.1f}%")
 
-    # ── MÉTRICAS OFENSIVAS ───────────────────────────────────────────
-    _section("📊 MÉTRICAS OFENSIVAS (70% casa/fora + 30% geral)")
-    _row(f"{'MÉTRICA':<22}  {'MANDANTE':>10}  {'VISITANTE':>10}")
+    # ── MÉTRICAS OFENSIVAS ────────────────────────────────────────────
+    _section("📈 MÉTRICAS OFENSIVAS (70% casa/fora + 30% geral)")
+    _row(f"{'MÉTRICA':<24}  {h_name[:14]:>14}  {a_name[:14]:>14}")
     _sep()
+    sot_h = h_blended.get("avg_sot", 0)
+    sot_a = a_blended.get("avg_sot", 0)
+    sh_h  = max(h_blended.get("avg_shots", 1), 1)
+    sh_a  = max(a_blended.get("avg_shots", 1), 1)
     for label, key in [
-        ("Gols/jogo (GF)",   "avg_gf"),
-        ("Gols sofridos/j",  "avg_gc"),
-        ("Chutes/jogo",      "avg_shots"),
-        ("No alvo/jogo",     "avg_sot"),
-        ("Escanteios/jogo",  "avg_corners"),
-        ("Posse (%)",        "avg_possession"),
+        ("Gols marcados/jogo",   "avg_gf"),
+        ("Gols sofridos/jogo",   "avg_gc"),
+        ("Chutes totais/jogo",   "avg_shots"),
+        ("Chutes no alvo/jogo",  "avg_sot"),
+        ("Precisão ofensiva (%)", "_sot_pct"),
+        ("Escanteios/jogo",      "avg_corners"),
+        ("Posse de bola (%)",    "avg_possession"),
     ]:
-        hv = h_blended.get(key, 0)
-        av = a_blended.get(key, 0)
-        _row(f"{label:<22}  {hv:>10.2f}  {av:>10.2f}")
+        if key == "_sot_pct":
+            hv = round(sot_h / sh_h * 100, 1)
+            av = round(sot_a / sh_a * 100, 1)
+            _row(f"{label:<24}  {hv:>14.1f}%  {av:>14.1f}%")
+        else:
+            hv = h_blended.get(key, 0)
+            av = a_blended.get(key, 0)
+            _row(f"{label:<24}  {hv:>14.2f}  {av:>14.2f}")
 
-    # ── PRESSURE INDEX ───────────────────────────────────────────────
-    _section("💥 PRESSURE INDEX")
+    # ── PRESSURE INDEX ────────────────────────────────────────────────
+    _section("💥 PRESSURE INDEX HISTÓRICO")
     for name, pi in [(h_name, h_pi), (a_name, a_pi)]:
-        bar = _render_bar(pi["index"], 100, 20)
-        _row(f"{name[:20]:<20}  {pi['index']:>3}/100  {bar}  {pi['label']}")
+        bar = _render_bar(pi["index"], 100, 22)
+        _row(f"{name[:22]:<22}  {pi['index']:>3}/100  {bar}  {pi['label']}")
 
-    # ── ESCANTEIOS ───────────────────────────────────────────────────
-    _section("🚩 ESCANTEIOS AVANÇADOS")
-    _row(f"Esperados: {h_name[:12]}={adv_corners['h_expected_corners']}  |  {a_name[:12]}={adv_corners['a_expected_corners']}  |  Total={adv_corners['total_expected']}")
+    # ── ESCANTEIOS ────────────────────────────────────────────────────
+    _section("🚩 MODELO DE ESCANTEIOS")
+    _row(f"Esperados: {h_name[:14]}={adv_corners['h_expected_corners']}  |  {a_name[:14]}={adv_corners['a_expected_corners']}  |  Total: {adv_corners['total_expected']}")
     dom = "Mandante domina" if adv_corners["corner_pressure"] > 0 else "Visitante domina"
-    _row(f"Pressão de escanteios: {adv_corners['corner_pressure']:+.1f}%  ({dom})")
+    _row(f"Pressão lateral: {adv_corners['corner_pressure']:+.1f}%  ({dom})")
     over_items = sorted(
         [(k.replace("over_","").replace("_","."), v) for k, v in adv_corners["probabilities"].items()],
         key=lambda x: float(x[0])
     )
-    row_parts = "   ".join(
-        f"{'🟢' if p>0.6 else ('🟡' if p>0.4 else '🔴')} +{k}: {p*100:.0f}%"
+    _row("  ".join(
+        f"{'🟢' if p>0.60 else ('🟡' if p>0.40 else '🔴')} Over {k}: {p*100:.0f}%"
         for k, p in over_items
-    )
-    _row(row_parts)
+    ))
 
-    # ── ÁRBITRO ──────────────────────────────────────────────────────
+    # ── ÁRBITRO ───────────────────────────────────────────────────────
     _section("🟨 ÁRBITRO")
     if ref_stats:
-        _row(f"{real_referee}  —  {ref_stats['games_sampled']} jogos amostrados")
+        _row(f"{real_referee}  —  {ref_stats['games_sampled']} jogos analisados")
         _row(f"Amarelos/jogo: {ref_stats['avg_yellows_per_game']}  |  Vermelhos/jogo: {ref_stats['avg_reds_per_game']}")
         _row(f"Referee Score: {ref_stats['referee_score']}/100 → {ref_stats['label']}")
     elif real_referee:
-        _row(f"{real_referee}  (histórico não disponível)")
+        _row(f"{real_referee}  (histórico disciplinar não disponível)")
     else:
         _row("Árbitro não divulgado.")
 
-    # ── MONTE CARLO ──────────────────────────────────────────────────
-    _section(f"🎲 MONTE CARLO — 100.000 simulações  |  λ {h_name[:10]}={mc['lambda_used']['home']}  λ {a_name[:10]}={mc['lambda_used']['away']}")
-    scores  = mc["top_scores"][:5]
-    markets = [
-        ("V.Mandante",  mc["home_win"]),
-        ("Empate",      mc["draw"]),
-        ("V.Visitante", mc["away_win"]),
-        ("BTTS",        mc["btts"]),
-        ("Over 2.5",    mc["over25"]),
-    ]
-    _row(f"{'PLACAR':^25}  {'MERCADO':^15}  {'%':>6}")
-    _sep()
-    for i in range(5):
-        sc = f"{scores[i][0]} → {scores[i][1]:.2f}%" if i < len(scores) else ""
-        mk_n, mk_v = markets[i]
-        bar = _render_bar(int(mk_v*100), 100, 10)
-        _row(f"{sc:<25}  {mk_n:<15} {bar} {mk_v*100:.1f}%")
+    # ── PREDIÇÃO NATIVA DA API-FOOTBALL ──────────────────────────────
+    if api_pred:
+        _section("🔮 PREDIÇÃO NATIVA — API-FOOTBALL")
+        _row(f"💬 Conselho: {api_pred['advice']}")
+        _row(f"🏆 Vencedor previsto: {api_pred['winner_name']}  |  {api_pred['winner_comment']}")
+        _row(f"⚽ Gols esperados: {h_name[:12]} {api_pred['goals_h']}  |  {a_name[:12]} {api_pred['goals_a']}")
+        _row(f"📊 Prob API: Casa {api_pred['percent_home']}  |  Empate {api_pred['percent_draw']}  |  Fora {api_pred['percent_away']}")
+        _sep()
+        _row(f"Ataque (API):  {h_name[:14]} {api_pred['comp_att_h']}  vs  {a_name[:14]} {api_pred['comp_att_a']}")
+        _row(f"Defesa (API):  {h_name[:14]} {api_pred['comp_def_h']}  vs  {a_name[:14]} {api_pred['comp_def_a']}")
+        _row(f"Forma (API):   {h_name[:14]} {api_pred['comp_form_h']}  vs  {a_name[:14]} {api_pred['comp_form_a']}")
+        _row(f"Poisson (API): {h_name[:14]} {api_pred['comp_poisson_h']}  vs  {a_name[:14]} {api_pred['comp_poisson_a']}")
+        _sep()
+        _row(f"Últ.5 {h_name[:12]}: {api_pred['h_last5_w']}V {api_pred['h_last5_d']}E {api_pred['h_last5_l']}D  GF:{api_pred['h_last5_gf']}/j  GA:{api_pred['h_last5_ga']}/j")
+        _row(f"Últ.5 {a_name[:12]}: {api_pred['a_last5_w']}V {api_pred['a_last5_d']}E {api_pred['a_last5_l']}D  GF:{api_pred['a_last5_gf']}/j  GA:{api_pred['a_last5_ga']}/j")
 
-    # ── VEREDICTO FINAL ──────────────────────────────────────────────
+    # ── MONTE CARLO ───────────────────────────────────────────────────
+    _section(f"🎲 MONTE CARLO 100k  λ {h_name[:12]}={mc['lambda_used']['home']}  λ {a_name[:12]}={mc['lambda_used']['away']}")
+    scores  = mc["top_scores"][:8]
+    markets = [
+        ("Vitória Mandante",    mc["home_win"]),
+        ("Empate",              mc["draw"]),
+        ("Vitória Visitante",   mc["away_win"]),
+        ("BTTS (ambos marcam)", mc["btts"]),
+        ("Over 1.5 gols",       mc["over15"]),
+        ("Over 2.5 gols",       mc["over25"]),
+        ("Over 3.5 gols",       mc["over35"]),
+        ("Under 2.5 gols",      1 - mc["over25"]),
+    ]
+    _row(f"{'#':>2}  {'PLACAR':<8} {'%':>7}    {'MERCADO':<22} {'%':>6}  {'':12}")
+    _sep()
+    for i in range(max(len(scores), len(markets))):
+        sc = f"{i+1:>2}  {scores[i][0]:<8} {scores[i][1]:>7.2f}%" if i < len(scores) else f"{'':>2}  {'':8} {'':>8}"
+        if i < len(markets):
+            mk_n, mk_v = markets[i]
+            bar = _render_bar(int(mk_v*100), 100, 10)
+            mk  = f"    {mk_n:<22} {mk_v*100:>5.1f}%  {bar}"
+        else:
+            mk = ""
+        _row(f"{sc}{mk}")
+
+    # ── ODDS COMPLETAS ────────────────────────────────────────────────
+    if all_odds:
+        _section("💰 ODDS DO MERCADO")
+        market_labels = [
+            ("home",    "1X2 — Casa"),
+            ("draw",    "1X2 — Empate"),
+            ("away",    "1X2 — Fora"),
+            ("btts_yes","BTTS — Sim"),
+            ("btts_no", "BTTS — Não"),
+            ("over15",  "Over 1.5"),
+            ("over25",  "Over 2.5"),
+            ("over35",  "Over 3.5"),
+            ("under25", "Under 2.5"),
+            ("dc_1x",   "DC Casa/Empate"),
+            ("dc_x2",   "DC Empate/Fora"),
+            ("dc_12",   "DC Casa/Fora"),
+            ("dnb_home","DNB — Casa"),
+            ("dnb_away","DNB — Fora"),
+            ("ht_home", "HT — Casa"),
+            ("ht_draw", "HT — Empate"),
+            ("ht_away", "HT — Fora"),
+        ]
+        row_buf = []
+        for key, label in market_labels:
+            val = all_odds.get(key)
+            if val:
+                row_buf.append(f"{label:<22}: {val:.2f}")
+                if len(row_buf) == 2:
+                    _row(f"{row_buf[0]}   {row_buf[1]}")
+                    row_buf = []
+        if row_buf:
+            _row(row_buf[0])
+
+    # ── VEREDICTO FINAL ───────────────────────────────────────────────
     if ensemble:
         print("╠" + "═"*W + "╣")
         print(f"║  🏆 VEREDICTO FINAL — ENSEMBLE V3  (Confiança: {conf['score']}/100 — {conf['label']})".ljust(W+1) + "║")
         print("║" + "═"*W + "║")
+        _row(f"{'MERCADO':<26}  {'PROB':>5}  {'':^12}  {'RECOMENDAÇÃO':<18}  {'EV':>7}")
+        _sep()
         for label, key, odd_key in [
-            (f"Vitória {h_name[:18]}", "home_win", "home"),
-            ("Empate",                  "draw",      "draw"),
-            (f"Vitória {a_name[:18]}", "away_win",  "away"),
-            ("BTTS",                    "btts",      None),
-            ("Over 2.5",               "over25",    None),
+            (f"Vitória {h_name[:16]}", "home_win",   "home"),
+            ("Empate",                  "draw",       "draw"),
+            (f"Vitória {a_name[:16]}", "away_win",   "away"),
+            ("BTTS (ambos marcam)",     "btts",       None),
+            ("Over 2.5 gols",          "over25",     None),
+            ("Under 2.5 gols",         "_under25",   None),
         ]:
-            prob = ensemble.get(key, 0)
+            prob = (1.0 - ensemble.get("over25", 0)) if key == "_under25" else ensemble.get(key, 0)
             if prob == 0:
                 continue
             pct = int(prob * 100)
             bar = _render_bar(pct, 100, 12)
-            rec, _ = _market_recommendation(prob)
+            rec, stars = _market_recommendation(prob)
             rec_icon = {"ENTRADA FORTE": "🟢", "ENTRADA": "🟡",
                         "AGUARDAR": "🟠", "EVITAR": "🔴"}.get(rec, "⚪")
-            ev_str = ""
+            ev_str = "  N/A "
             if ev_final and odd_key and odd_key in ev_final:
-                ev_val = ev_final[odd_key]
-                ev_str = f"  EV {ev_val*100:+.1f}%"
-            print(f"║  {label:<26} {pct:>3}%  {bar}  {rec_icon} {rec}{ev_str}".ljust(W+1) + "║")
+                ev_str = f"{ev_final[odd_key]*100:>+6.1f}%"
+            _row(f"{label:<26}  {pct:>4}%  {bar}  {rec_icon} {rec:<18}  {ev_str}")
+        _sep()
+        if mc.get("top_scores"):
+            _row(f"🎯 Placar mais provável: {mc['top_scores'][0][0]}  ({mc['top_scores'][0][1]:.2f}%)")
+            top3 = "   ".join(f"{s[0]} {s[1]:.1f}%" for s in mc["top_scores"][:5])
+            _row(f"   Top 5: {top3}")
+        _row(f"📊 Fontes ensemble: {', '.join(ensemble.get('sources_used', []))}")
 
     print("╚" + "═"*W + "╝")
 
 
 def execute_advanced_pre_live_analysis_v3():
-    """Análise pré-jogo V3 PRO com todos os 12 módulos matemáticos."""
+    """Análise pré-jogo V3 PRO — relatório completo com todos os módulos."""
     global selected_match
 
     execute_advanced_pre_live_analysis_v21()
@@ -3110,7 +3518,7 @@ def execute_advanced_pre_live_analysis_v3():
     raw_fixture = selected_match["raw_data"]
 
     print("\n" + "═"*70)
-    print("⏳ Coletando dados V3 PRO... (pode levar alguns segundos)")
+    print("⏳ Coletando dados V3 PRO — aguarde (múltiplas APIs)...")
     print("═"*70)
 
     def _fetch_hist(team_id, n=10):
@@ -3124,24 +3532,40 @@ def execute_advanced_pre_live_analysis_v3():
     h_hist = _fetch_hist(h_id, 10)
     a_hist = _fetch_hist(a_id, 10)
 
-    real_referee = raw_fixture.get("fixture", {}).get("referee")
-    real_odds    = get_fixture_odds(fixture_id)
+    real_referee  = raw_fixture.get("fixture", {}).get("referee")
+    real_odds     = get_fixture_odds(fixture_id)
+    match_datetime = raw_fixture.get("fixture", {}).get("date", "")
+    league_name   = raw_fixture.get("league", {}).get("name", "")
+    season        = raw_fixture.get("league", {}).get("season") or 2024
+    league_id     = raw_fixture.get("league", {}).get("id") or WORLD_CUP_LEAGUE_ID
 
-    # Forma recente
-    h_form = _format_recent_form(h_hist, h_id)
-    a_form = _format_recent_form(a_hist, a_id)
+    print("  ▸ Forma recente e H2H...")
+    h_form   = _format_recent_form(h_hist, h_id)
+    a_form   = _format_recent_form(a_hist, a_id)
+    h2h_list = _fetch_h2h_summary(h_id, a_id, n=8)
 
-    # H2H
-    h2h_list = _fetch_h2h_summary(h_id, a_id, n=5)
+    print("  ▸ Classificações na liga...")
+    h_standing = _fetch_team_standings(h_id, league_id, season)
+    a_standing = _fetch_team_standings(a_id, league_id, season)
 
-    # M1 — xG
-    h_xg_hist = get_team_xg_history(h_hist, h_id)
-    a_xg_hist = get_team_xg_history(a_hist, a_id)
-    h_wxg, h_wxga = calculate_weighted_xg(h_xg_hist)
-    a_wxg, a_wxga = calculate_weighted_xg(a_xg_hist)
-    xg_lh, xg_la  = calculate_xg_lambdas(h_wxg, a_wxga, a_wxg, h_wxga)
+    print("  ▸ Jogadores-chave / artilheiros...")
+    h_players = _fetch_top_players(h_id, season, league_id)
+    a_players = _fetch_top_players(a_id, season, league_id)
 
-    # M2 — Casa/Fora
+    print("  ▸ Escalações...")
+    lineups = _fetch_fixture_lineups(fixture_id)
+
+    print("  ▸ Predição nativa da API-Football...")
+    api_pred = _fetch_api_predictions(fixture_id)
+
+    print("  ▸ Estádio e clima...")
+    venue   = _fetch_venue_info(raw_fixture)
+    weather = _fetch_weather(venue["city"]) if venue and venue.get("city") and venue["city"] != "?" else None
+
+    print("  ▸ Odds — múltiplos mercados...")
+    all_odds = _fetch_all_odds_markets(fixture_id, real_odds)
+
+    print("  ▸ Estatísticas históricas (casa/fora + blend)...")
     h_home_fix = fetch_home_away_fixtures(h_id, "home", 10)
     a_away_fix = fetch_home_away_fixtures(a_id, "away", 10)
     h_home_m   = compile_home_away_metrics(h_home_fix, h_id, "home")
@@ -3150,6 +3574,13 @@ def execute_advanced_pre_live_analysis_v3():
     a_gen      = _fetch_real_general_stats(a_hist, a_id)
     h_blended  = blend_home_away_general(h_home_m, h_gen)
     a_blended  = blend_home_away_general(a_away_m, a_gen)
+
+    print("  ▸ Módulos matemáticos (xG, ELO, Monte Carlo)...")
+
+    # M1 — xG
+    h_wxg, h_wxga = calculate_weighted_xg(get_team_xg_history(h_hist, h_id))
+    a_wxg, a_wxga = calculate_weighted_xg(get_team_xg_history(a_hist, a_id))
+    xg_lh, xg_la  = calculate_xg_lambdas(h_wxg, a_wxga, a_wxg, h_wxga)
 
     # M3 — ELO
     h_elo     = calculate_team_elo(h_id)
@@ -3162,18 +3593,18 @@ def execute_advanced_pre_live_analysis_v3():
     a_pi = calculate_historical_pressure_index(
         a_blended.get("avg_shots", 12), a_blended.get("avg_sot", 4.5), a_blended.get("avg_corners", 5))
 
-    # M5 — EV (Poisson com lambdas xG)
-    lh = xg_lh if xg_lh else 1.2
-    la = xg_la if xg_la else 0.9
+    # M5 — Poisson
+    lh = xg_lh if xg_lh else h_blended.get("avg_gf", 1.2)
+    la = xg_la if xg_la else a_blended.get("avg_gf", 0.9)
     _hw = _dr = _aw = _btts = _o25 = 0.0
     for _hg in range(10):
         for _ag in range(10):
             _p = poisson_probability(lh, _hg) * poisson_probability(la, _ag)
-            if _hg > _ag:   _hw   += _p
-            elif _hg == _ag: _dr  += _p
+            if _hg > _ag:    _hw   += _p
+            elif _hg == _ag: _dr   += _p
             else:            _aw   += _p
-            if _hg > 0 and _ag > 0: _btts += _p
-            if (_hg + _ag) > 2:     _o25  += _p
+            if _hg > 0 and _ag > 0:    _btts += _p
+            if (_hg + _ag) > 2:        _o25  += _p
     _s = _hw + _dr + _aw
     if _s > 0:
         _hw /= _s; _dr /= _s; _aw /= _s
@@ -3192,8 +3623,7 @@ def execute_advanced_pre_live_analysis_v3():
 
     # M9 — Monte Carlo
     mc = run_monte_carlo(
-        xg_lh if xg_lh else h_blended.get("avg_gf", 1.2),
-        xg_la if xg_la else a_blended.get("avg_gf", 0.9),
+        lh, la,
         n_simulations=100000,
         elo_weight=elo_probs["elo_diff"],
         xg_lambda_home=xg_lh,
@@ -3205,9 +3635,8 @@ def execute_advanced_pre_live_analysis_v3():
     # M10 — ML
     h_rest = calculate_rest_days(h_hist[0]["fixture"]["date"][:10] if h_hist else None)
     a_rest = calculate_rest_days(a_hist[0]["fixture"]["date"][:10] if a_hist else None)
-    ml_features = extract_ml_features(h_blended, a_blended, h_elo, a_elo, h_pi, a_pi,
-                                       h_rest, a_rest, real_odds, ref_stats)
-    ml_probs = ml_model_predict(ml_features)
+    ml_probs = ml_model_predict(extract_ml_features(
+        h_blended, a_blended, h_elo, a_elo, h_pi, a_pi, h_rest, a_rest, real_odds, ref_stats))
 
     # M11 — Confidence Score
     data_quality = min(100,
@@ -3228,16 +3657,16 @@ def execute_advanced_pre_live_analysis_v3():
                    "away_win": elo_probs["away_win"]},
     )
 
-    # EV final com probabilidades do Ensemble
+    # EV Final
     ev_final = {}
     if real_odds and ensemble:
         for side, odd_key in [("home_win","home"), ("draw","draw"), ("away_win","away")]:
-            prob = ensemble.get(side, 0)
-            odd  = real_odds.get(odd_key)
+            odd = real_odds.get(odd_key)
             if odd:
-                ev_final[odd_key] = (prob * odd) - 1.0
+                ev_final[odd_key] = (ensemble.get(side, 0) * odd) - 1.0
 
-    # Renderiza painel final
+    print("  ✅ Dados coletados — renderizando relatório...\n")
+
     _render_pre_game_dashboard(
         h_name=h_name, a_name=a_name, fixture_id=fixture_id,
         h_id=h_id, a_id=a_id,
@@ -3251,9 +3680,20 @@ def execute_advanced_pre_live_analysis_v3():
         ensemble=ensemble, conf=conf,
         ev_final=ev_final,
         xg_lh=xg_lh, xg_la=xg_la,
+        h_standing=h_standing, a_standing=a_standing,
+        h_players=h_players, a_players=a_players,
+        lineups=lineups,
+        api_pred=api_pred,
+        weather=weather,
+        venue=venue,
+        all_odds=all_odds,
+        match_datetime=match_datetime,
+        league_name=league_name,
     )
 
     input("\nPressione ENTER para retornar ao menu da partida...")
+
+
 
 
 
