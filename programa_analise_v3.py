@@ -2849,35 +2849,274 @@ def calculate_ensemble_probability(poisson_probs, mc_probs, ml_probs,
 # ANÁLISE V3 PRINCIPAL - ORQUESTRA TODOS OS 12 MÓDULOS
 # =====================================================================
 
+
+# =====================================================================
+# HELPERS PRÉ-JOGO V3
+# =====================================================================
+
+def _fetch_real_general_stats(hist, team_id, n=10):
+    """Busca estatísticas reais dos últimos N jogos para o blend geral."""
+    import requests as _req
+    shots_l, sot_l, corners_l, poss_l, gf_l, gc_l = [], [], [], [], [], []
+    for f in hist[:n]:
+        is_home = int(f["teams"]["home"]["id"]) == int(team_id)
+        gf_l.append(f["goals"]["home"] if is_home else f["goals"]["away"])
+        gc_l.append(f["goals"]["away"] if is_home else f["goals"]["home"])
+        try:
+            sr = _req.get(
+                f"{BASE_URL}/fixtures/statistics",
+                headers=headers,
+                params={"fixture": f["fixture"]["id"]}
+            ).json().get("response", [])
+            for block in sr:
+                if int(block.get("team", {}).get("id", -1)) == int(team_id):
+                    def _ps(bt, tp):
+                        for s in bt.get("statistics", []):
+                            if s["type"] == tp:
+                                v = str(s.get("value", "0")).replace("%", "").strip()
+                                return int(v) if v.isdigit() else 0
+                        return 0
+                    shots_l.append(_ps(block, "Total Shots"))
+                    sot_l.append(_ps(block, "Shots on Goal"))
+                    corners_l.append(_ps(block, "Corner Kicks"))
+                    poss_l.append(_ps(block, "Ball Possession"))
+        except Exception:
+            pass
+    avg = lambda l, fb: round(sum(l)/len(l), 2) if l else fb
+    return {
+        "avg_gf":        avg(gf_l,    1.2),
+        "avg_gc":        avg(gc_l,    1.0),
+        "avg_shots":     avg(shots_l, 12.0),
+        "avg_sot":       avg(sot_l,   4.5),
+        "avg_corners":   avg(corners_l, 5.0),
+        "avg_poss_calc": avg(poss_l,  50.0),
+    }
+
+
+def _format_recent_form(hist, team_id, n=5):
+    """Retorna lista de dicts com forma recente: resultado, placar, adversário."""
+    results = []
+    for f in hist[:n]:
+        is_home = int(f["teams"]["home"]["id"]) == int(team_id)
+        gh = f["goals"].get("home") or 0
+        ga = f["goals"].get("away") or 0
+        gf = gh if is_home else ga
+        gc = ga if is_home else gh
+        if gf > gc:    res = "V"
+        elif gf == gc: res = "E"
+        else:          res = "D"
+        opp = f["teams"]["away"]["name"] if is_home else f["teams"]["home"]["name"]
+        results.append({
+            "res":   res,
+            "gf":    gf,
+            "gc":    gc,
+            "opp":   opp[:16],
+            "venue": "Casa" if is_home else "Fora",
+        })
+    return results
+
+
+def _fetch_h2h_summary(h_id, a_id, n=5):
+    """Busca últimos N confrontos diretos entre os dois times."""
+    try:
+        res = requests.get(
+            f"{BASE_URL}/fixtures/headtohead",
+            headers=headers,
+            params={"h2h": f"{h_id}-{a_id}", "last": n, "status": "FT"}
+        ).json()
+        return res.get("response", [])
+    except Exception:
+        return []
+
+
+def _render_pre_game_dashboard(
+        h_name, a_name, fixture_id,
+        h_id, a_id,
+        h_form, a_form,
+        h2h_list,
+        h_blended, a_blended,
+        h_elo, a_elo, elo_probs,
+        h_pi, a_pi,
+        adv_corners,
+        mc, ref_stats, real_referee,
+        ensemble, conf,
+        ev_final,
+        xg_lh, xg_la,
+        W=70):
+    """Renderiza toda a análise pré-jogo em formato visual profissional."""
+
+    res_icon = {"V": "🟢", "E": "🟡", "D": "🔴"}
+
+    def _row(text):
+        print(f"║  {text}".ljust(W+1) + "║")
+
+    def _sep():
+        print("║" + "─"*W + "║")
+
+    def _section(title):
+        print("╠" + "═"*W + "╣")
+        print(f"║  {title}".ljust(W+1) + "║")
+        _sep()
+
+    print("╔" + "═"*W + "╗")
+    print(f"║  ⚽  ANÁLISE PRÉ-JOGO V3 PRO  —  {h_name} x {a_name}".ljust(W+1) + "║")
+    print(f"║  🆔 Fixture ID: {fixture_id}".ljust(W+1) + "║")
+
+    # ── FORMA RECENTE ────────────────────────────────────────────────
+    _section("📋 FORMA RECENTE (últimos 5 jogos)")
+    for name, form in [(h_name, h_form), (a_name, a_form)]:
+        icons = "  ".join(f"{res_icon.get(g['res'],'⚪')}{g['res']}" for g in form)
+        _row(f"{name[:22]:<22}  {icons}")
+        for g in form:
+            _row(f"   vs {g['opp']:<16} [{g['venue']}]  {g['gf']}-{g['gc']}")
+        if name == h_name:
+            _sep()
+
+    # ── H2H ─────────────────────────────────────────────────────────
+    if h2h_list:
+        _section(f"⚔️  CONFRONTO DIRETO — últimos {len(h2h_list)} jogos")
+        h_w = a_w = dr = 0
+        for f in h2h_list:
+            gh = f["goals"].get("home") or 0
+            ga = f["goals"].get("away") or 0
+            date = f["fixture"]["date"][:10]
+            hn = f["teams"]["home"]["name"][:14]
+            an = f["teams"]["away"]["name"][:14]
+            winner = "━" if gh == ga else ("◀" if gh > ga else "▶")
+            _row(f"{date}  {hn:<14} {gh}-{ga} {an:<14}  {winner}")
+            if int(f["teams"]["home"]["id"]) == int(h_id):
+                if gh > ga: h_w += 1
+                elif gh == ga: dr += 1
+                else: a_w += 1
+            else:
+                if ga > gh: h_w += 1
+                elif gh == ga: dr += 1
+                else: a_w += 1
+        _sep()
+        _row(f"{h_name[:16]} venceu: {h_w}  |  Empates: {dr}  |  {a_name[:16]} venceu: {a_w}")
+
+    # ── ELO ─────────────────────────────────────────────────────────
+    _section("♟️  ELO RATING")
+    _row(f"{h_name[:26]:<26}  ELO: {h_elo['elo']:>4}  Tend: {h_elo['trend']:+.1f}  ({h_elo['games']} jogos)")
+    _row(f"{a_name[:26]:<26}  ELO: {a_elo['elo']:>4}  Tend: {a_elo['trend']:+.1f}  ({a_elo['games']} jogos)")
+    _row(f"Prob ELO: V.Mandante {elo_probs['home_win']*100:.1f}%  |  Empate {elo_probs['draw']*100:.1f}%  |  V.Visit. {elo_probs['away_win']*100:.1f}%")
+
+    # ── MÉTRICAS OFENSIVAS ───────────────────────────────────────────
+    _section("📊 MÉTRICAS OFENSIVAS (70% casa/fora + 30% geral)")
+    _row(f"{'MÉTRICA':<22}  {'MANDANTE':>10}  {'VISITANTE':>10}")
+    _sep()
+    for label, key in [
+        ("Gols/jogo (GF)",   "avg_gf"),
+        ("Gols sofridos/j",  "avg_gc"),
+        ("Chutes/jogo",      "avg_shots"),
+        ("No alvo/jogo",     "avg_sot"),
+        ("Escanteios/jogo",  "avg_corners"),
+        ("Posse (%)",        "avg_possession"),
+    ]:
+        hv = h_blended.get(key, 0)
+        av = a_blended.get(key, 0)
+        _row(f"{label:<22}  {hv:>10.2f}  {av:>10.2f}")
+
+    # ── PRESSURE INDEX ───────────────────────────────────────────────
+    _section("💥 PRESSURE INDEX")
+    for name, pi in [(h_name, h_pi), (a_name, a_pi)]:
+        bar = _render_bar(pi["index"], 100, 20)
+        _row(f"{name[:20]:<20}  {pi['index']:>3}/100  {bar}  {pi['label']}")
+
+    # ── ESCANTEIOS ───────────────────────────────────────────────────
+    _section("🚩 ESCANTEIOS AVANÇADOS")
+    _row(f"Esperados: {h_name[:12]}={adv_corners['h_expected_corners']}  |  {a_name[:12]}={adv_corners['a_expected_corners']}  |  Total={adv_corners['total_expected']}")
+    dom = "Mandante domina" if adv_corners["corner_pressure"] > 0 else "Visitante domina"
+    _row(f"Pressão de escanteios: {adv_corners['corner_pressure']:+.1f}%  ({dom})")
+    over_items = sorted(
+        [(k.replace("over_","").replace("_","."), v) for k, v in adv_corners["probabilities"].items()],
+        key=lambda x: float(x[0])
+    )
+    row_parts = "   ".join(
+        f"{'🟢' if p>0.6 else ('🟡' if p>0.4 else '🔴')} +{k}: {p*100:.0f}%"
+        for k, p in over_items
+    )
+    _row(row_parts)
+
+    # ── ÁRBITRO ──────────────────────────────────────────────────────
+    _section("🟨 ÁRBITRO")
+    if ref_stats:
+        _row(f"{real_referee}  —  {ref_stats['games_sampled']} jogos amostrados")
+        _row(f"Amarelos/jogo: {ref_stats['avg_yellows_per_game']}  |  Vermelhos/jogo: {ref_stats['avg_reds_per_game']}")
+        _row(f"Referee Score: {ref_stats['referee_score']}/100 → {ref_stats['label']}")
+    elif real_referee:
+        _row(f"{real_referee}  (histórico não disponível)")
+    else:
+        _row("Árbitro não divulgado.")
+
+    # ── MONTE CARLO ──────────────────────────────────────────────────
+    _section(f"🎲 MONTE CARLO — 100.000 simulações  |  λ {h_name[:10]}={mc['lambda_used']['home']}  λ {a_name[:10]}={mc['lambda_used']['away']}")
+    scores  = mc["top_scores"][:5]
+    markets = [
+        ("V.Mandante",  mc["home_win"]),
+        ("Empate",      mc["draw"]),
+        ("V.Visitante", mc["away_win"]),
+        ("BTTS",        mc["btts"]),
+        ("Over 2.5",    mc["over25"]),
+    ]
+    _row(f"{'PLACAR':^25}  {'MERCADO':^15}  {'%':>6}")
+    _sep()
+    for i in range(5):
+        sc = f"{scores[i][0]} → {scores[i][1]:.2f}%" if i < len(scores) else ""
+        mk_n, mk_v = markets[i]
+        bar = _render_bar(int(mk_v*100), 100, 10)
+        _row(f"{sc:<25}  {mk_n:<15} {bar} {mk_v*100:.1f}%")
+
+    # ── VEREDICTO FINAL ──────────────────────────────────────────────
+    if ensemble:
+        print("╠" + "═"*W + "╣")
+        print(f"║  🏆 VEREDICTO FINAL — ENSEMBLE V3  (Confiança: {conf['score']}/100 — {conf['label']})".ljust(W+1) + "║")
+        print("║" + "═"*W + "║")
+        for label, key, odd_key in [
+            (f"Vitória {h_name[:18]}", "home_win", "home"),
+            ("Empate",                  "draw",      "draw"),
+            (f"Vitória {a_name[:18]}", "away_win",  "away"),
+            ("BTTS",                    "btts",      None),
+            ("Over 2.5",               "over25",    None),
+        ]:
+            prob = ensemble.get(key, 0)
+            if prob == 0:
+                continue
+            pct = int(prob * 100)
+            bar = _render_bar(pct, 100, 12)
+            rec, _ = _market_recommendation(prob)
+            rec_icon = {"ENTRADA FORTE": "🟢", "ENTRADA": "🟡",
+                        "AGUARDAR": "🟠", "EVITAR": "🔴"}.get(rec, "⚪")
+            ev_str = ""
+            if ev_final and odd_key and odd_key in ev_final:
+                ev_val = ev_final[odd_key]
+                ev_str = f"  EV {ev_val*100:+.1f}%"
+            print(f"║  {label:<26} {pct:>3}%  {bar}  {rec_icon} {rec}{ev_str}".ljust(W+1) + "║")
+
+    print("╚" + "═"*W + "╝")
+
+
 def execute_advanced_pre_live_analysis_v3():
-    """
-    Executa a análise V3 PRO com todos os 12 módulos matemáticos avançados.
-    Chama primeiro a análise V2.1 completa e depois adiciona os blocos V3.
-    """
+    """Análise pré-jogo V3 PRO com todos os 12 módulos matemáticos."""
     global selected_match
 
-    # Executa análise V2.1 completa (preserva compatibilidade)
     execute_advanced_pre_live_analysis_v21()
 
-    print("\n" + "=" * 70)
-    print("🚀 MÓDULOS AVANÇADOS V3 PRO — ANÁLISE MATEMÁTICA PROFISSIONAL")
-    print("=" * 70)
+    h_id        = selected_match["home_id"]
+    a_id        = selected_match["away_id"]
+    h_name      = selected_match["home_name"]
+    a_name      = selected_match["away_name"]
+    fixture_id  = selected_match["fixture_id"]
+    raw_fixture = selected_match["raw_data"]
 
-    h_id = selected_match['home_id']
-    a_id = selected_match['away_id']
-    h_name = selected_match['home_name']
-    a_name = selected_match['away_name']
-    fixture_id = selected_match['fixture_id']
-    raw_fixture = selected_match['raw_data']
+    print("\n" + "═"*70)
+    print("⏳ Coletando dados V3 PRO... (pode levar alguns segundos)")
+    print("═"*70)
 
-    print("\n⏳ Coletando dados para módulos V3... (pode levar alguns segundos)")
-
-    # --- Busca histórico geral (reutiliza lógica do V2.1) ---
     def _fetch_hist(team_id, n=10):
-        import requests as _req
         try:
-            res = _req.get(f"{BASE_URL}/fixtures", headers=headers,
-                           params={"team": team_id, "status": "FT", "last": n}).json()
+            res = requests.get(f"{BASE_URL}/fixtures", headers=headers,
+                               params={"team": team_id, "status": "FT", "last": n}).json()
             return res.get("response", [])
         except Exception:
             return []
@@ -2886,313 +3125,136 @@ def execute_advanced_pre_live_analysis_v3():
     a_hist = _fetch_hist(a_id, 10)
 
     real_referee = raw_fixture.get("fixture", {}).get("referee")
-    real_odds = get_fixture_odds(fixture_id)
+    real_odds    = get_fixture_odds(fixture_id)
 
-    # ── MÓDULO 1: xG/xGA ────────────────────────────────────────────
-    print("\n📐 V3-M1: EXPECTED GOALS (xG/xGA)")
-    h_xg_hist = get_team_xg_history(h_hist, h_id, n=10)
-    a_xg_hist = get_team_xg_history(a_hist, a_id, n=10)
+    # Forma recente
+    h_form = _format_recent_form(h_hist, h_id)
+    a_form = _format_recent_form(a_hist, a_id)
+
+    # H2H
+    h2h_list = _fetch_h2h_summary(h_id, a_id, n=5)
+
+    # M1 — xG
+    h_xg_hist = get_team_xg_history(h_hist, h_id)
+    a_xg_hist = get_team_xg_history(a_hist, a_id)
     h_wxg, h_wxga = calculate_weighted_xg(h_xg_hist)
     a_wxg, a_wxga = calculate_weighted_xg(a_xg_hist)
-    xg_lh, xg_la = calculate_xg_lambdas(h_wxg, a_wxga, a_wxg, h_wxga)
+    xg_lh, xg_la  = calculate_xg_lambdas(h_wxg, a_wxga, a_wxg, h_wxga)
 
-    print(f"  {h_name}: xG ponderado = {h_wxg} | xGA ponderado = {h_wxga}")
-    print(f"  {a_name}: xG ponderado = {a_wxg} | xGA ponderado = {a_wxga}")
-    if xg_lh and xg_la:
-        print(f"  Lambda xG -> {h_name}: {xg_lh} | {a_name}: {xg_la}")
-    else:
-        print("  xG lambda: dados insuficientes — usando lambda Poisson base.")
-
-    # ── MÓDULO 2: CASA X FORA ────────────────────────────────────────
-    print("\n🏠 V3-M2: MÉTRICAS CASA X FORA")
+    # M2 — Casa/Fora
     h_home_fix = fetch_home_away_fixtures(h_id, "home", 10)
     a_away_fix = fetch_home_away_fixtures(a_id, "away", 10)
-    h_home_m = compile_home_away_metrics(h_home_fix, h_id, "home")
-    a_away_m = compile_home_away_metrics(a_away_fix, a_id, "away")
+    h_home_m   = compile_home_away_metrics(h_home_fix, h_id, "home")
+    a_away_m   = compile_home_away_metrics(a_away_fix, a_id, "away")
+    h_gen      = _fetch_real_general_stats(h_hist, h_id)
+    a_gen      = _fetch_real_general_stats(a_hist, a_id)
+    h_blended  = blend_home_away_general(h_home_m, h_gen)
+    a_blended  = blend_home_away_general(a_away_m, a_gen)
 
-    # Métricas gerais proxy para blend
-    def _general_proxy(hist, team_id):
-        gf_l, gc_l = [], []
-        for f in hist[:10]:
-            is_h = int(f["teams"]["home"]["id"]) == int(team_id)
-            gf_l.append(f["goals"]["home"] if is_h else f["goals"]["away"])
-            gc_l.append(f["goals"]["away"] if is_h else f["goals"]["home"])
-        avg = lambda l: round(sum(l)/len(l), 2) if l else 0.0
-        return {"avg_gf": avg(gf_l), "avg_gc": avg(gc_l),
-                "avg_shots": 12.0, "avg_sot": 4.5,
-                "avg_corners": 5.0, "avg_poss_calc": 50.0}
-
-    h_gen = _general_proxy(h_hist, h_id)
-    a_gen = _general_proxy(a_hist, a_id)
-    h_blended = blend_home_away_general(h_home_m, h_gen)
-    a_blended = blend_home_away_general(a_away_m, a_gen)
-
-    if h_home_m:
-        print(f"  {h_name} em casa ({h_home_m['n']} jogos): GF={h_home_m['avg_gf']} | GC={h_home_m['avg_gc']} | Chutes={h_home_m['avg_shots']} | Posse={h_home_m['avg_possession']}%")
-    else:
-        print(f"  {h_name} em casa: dados insuficientes")
-    if a_away_m:
-        print(f"  {a_name} fora ({a_away_m['n']} jogos): GF={a_away_m['avg_gf']} | GC={a_away_m['avg_gc']} | Chutes={a_away_m['avg_shots']} | Posse={a_away_m['avg_possession']}%")
-    else:
-        print(f"  {a_name} fora: dados insuficientes")
-    print(f"  Blended (70% casa/fora + 30% geral): {h_name} GF={h_blended.get('avg_gf')} | {a_name} GF={a_blended.get('avg_gf')}")
-
-    # ── MÓDULO 3: ELO RATING ─────────────────────────────────────────
-    print("\n♟️ V3-M3: ELO RATING")
-    h_elo = calculate_team_elo(h_id)
-    a_elo = calculate_team_elo(a_id)
+    # M3 — ELO
+    h_elo     = calculate_team_elo(h_id)
+    a_elo     = calculate_team_elo(a_id)
     elo_probs = elo_win_probability(h_elo["elo"], a_elo["elo"])
 
-    print(f"  {h_name}: ELO = {h_elo['elo']} (calculado em {h_elo['games']} jogos) | Tendência: {h_elo['trend']:+.1f}")
-    print(f"  {a_name}: ELO = {a_elo['elo']} (calculado em {a_elo['games']} jogos) | Tendência: {a_elo['trend']:+.1f}")
-    print(f"  ELO → Vitória {h_name}: {elo_probs['home_win']*100:.1f}% | Empate: {elo_probs['draw']*100:.1f}% | Vitória {a_name}: {elo_probs['away_win']*100:.1f}%")
-    print(f"  Diferença de ELO: {elo_probs['elo_diff']:+.0f} pontos")
-
-    # ── MÓDULO 4: PRESSURE INDEX PRÉ-LIVE ───────────────────────────
-    print("\n💥 V3-M4: PRESSURE INDEX (PRÉ-LIVE)")
+    # M4 — Pressure Index
     h_pi = calculate_historical_pressure_index(
-        h_blended.get("avg_shots", 12),
-        h_blended.get("avg_sot", 4.5),
-        h_blended.get("avg_corners", 5)
-    )
+        h_blended.get("avg_shots", 12), h_blended.get("avg_sot", 4.5), h_blended.get("avg_corners", 5))
     a_pi = calculate_historical_pressure_index(
-        a_blended.get("avg_shots", 12),
-        a_blended.get("avg_sot", 4.5),
-        a_blended.get("avg_corners", 5)
-    )
-    print(f"  {h_name}: Pressure Index = {h_pi['index']}/100 → {h_pi['label']}")
-    print(f"  {a_name}: Pressure Index = {a_pi['index']}/100 → {a_pi['label']}")
+        a_blended.get("avg_shots", 12), a_blended.get("avg_sot", 4.5), a_blended.get("avg_corners", 5))
 
-    # ── MÓDULO 5: EXPECTED VALUE AVANÇADO ───────────────────────────
-    print("\n💰 V3-M5: EXPECTED VALUE AVANÇADO")
-    # Busca odds adicionais
-    extra_odds = get_additional_odds(fixture_id)
-
-    # Probabilidades do modelo para os mercados principais
-    _lh_base = xg_lh if xg_lh else 1.2
-    _la_base = xg_la if xg_la else 0.9
-    _hw, _dr, _aw = 0.0, 0.0, 0.0
-    _btts, _o25 = 0.0, 0.0
+    # M5 — EV (Poisson com lambdas xG)
+    lh = xg_lh if xg_lh else 1.2
+    la = xg_la if xg_la else 0.9
+    _hw = _dr = _aw = _btts = _o25 = 0.0
     for _hg in range(10):
         for _ag in range(10):
-            _p = poisson_probability(_lh_base, _hg) * poisson_probability(_la_base, _ag)
-            if _hg > _ag:
-                _hw += _p
-            elif _hg == _ag:
-                _dr += _p
-            else:
-                _aw += _p
-            if _hg > 0 and _ag > 0:
-                _btts += _p
-            if (_hg + _ag) > 2:
-                _o25 += _p
+            _p = poisson_probability(lh, _hg) * poisson_probability(la, _ag)
+            if _hg > _ag:   _hw   += _p
+            elif _hg == _ag: _dr  += _p
+            else:            _aw   += _p
+            if _hg > 0 and _ag > 0: _btts += _p
+            if (_hg + _ag) > 2:     _o25  += _p
     _s = _hw + _dr + _aw
     if _s > 0:
-        _hw /= _s
-        _dr /= _s
-        _aw /= _s
-        _btts /= _s
-        _o25 /= _s
-
+        _hw /= _s; _dr /= _s; _aw /= _s
     xg_model_probs = {"home_win": _hw, "draw": _dr, "away_win": _aw, "btts": _btts, "over25": _o25}
 
-    ev_odds = {}
-    ev_model = {}
-    label_map = {}
-
-    if real_odds:
-        ev_odds["home"] = real_odds["home"]
-        ev_odds["draw"] = real_odds["draw"]
-        ev_odds["away"] = real_odds["away"]
-        ev_model["home"] = _hw
-        ev_model["draw"] = _dr
-        ev_model["away"] = _aw
-        label_map["home"] = f"Vitória {h_name}"
-        label_map["draw"] = "Empate"
-        label_map["away"] = f"Vitória {a_name}"
-
-    if extra_odds.get("btts"):
-        ev_odds["btts"] = extra_odds["btts"]
-        ev_model["btts"] = _btts
-        label_map["btts"] = "BTTS Sim"
-
-    ev_result = calculate_advanced_ev(ev_model, ev_odds, label_map)
-
-    if ev_result and ev_result["markets"]:
-        for key, data in ev_result["markets"].items():
-            marker = ""
-            if data["ev_pct"] > 15:
-                marker = "🔥"
-            elif data["ev_pct"] > 10:
-                marker = "✅"
-            elif data["ev_pct"] > 5:
-                marker = "📊"
-            elif data["ev_pct"] > 0:
-                marker = "➕"
-            else:
-                marker = "❌"
-            print(f"  {marker} EV {data['label']}: {data['ev_pct']:+.2f}% (Modelo: {data['prob_model']}% | Odd: {data['odd']})")
-        for alert in ev_result["alerts"]:
-            print(f"  {alert}")
-    else:
-        print("  Odds reais indisponíveis — EV não calculado.")
-
-    # ── MÓDULO 6: ODDS MOVEMENT ──────────────────────────────────────
-    print("\n📈 V3-M6: MONITORAMENTO DE ODDS")
-    if real_odds:
-        movement = track_odds_movement(fixture_id, real_odds)
-        if movement:
-            if movement.get("status") == "opening_registered":
-                print(f"  Odds de abertura registradas: Casa={real_odds['home']} | Empate={real_odds['draw']} | Fora={real_odds['away']}")
-                print("  (Execute novamente para detectar variações de mercado)")
-            elif movement.get("movement"):
-                for side, data in movement["movement"].items():
-                    print(f"  {side.upper()}: Abertura={data['opening']} → Atual={data['current']} ({data['change_pct']:+.1f}%)")
-                for alert in movement.get("alerts", []):
-                    print(f"  {alert}")
-    else:
-        print("  Odds indisponíveis para monitoramento.")
-
+    # M6 — Odds Movement
     odds_movement_result = track_odds_movement(fixture_id, real_odds) if real_odds else None
 
-    # ── MÓDULO 7: REFEREE SCORE ──────────────────────────────────────
-    print("\n🟨 V3-M7: ANÁLISE DO ÁRBITRO")
+    # M7 — Referee
     ref_stats = None
     if real_referee:
-        print(f"  Árbitro: {real_referee}")
-        print("  Buscando histórico disciplinar...")
         ref_stats = get_referee_stats(real_referee, season=2024, sample=15)
-        if ref_stats:
-            print(f"  Jogos analisados: {ref_stats['games_sampled']}")
-            print(f"  Amarelos/jogo: {ref_stats['avg_yellows_per_game']} | Vermelhos/jogo: {ref_stats['avg_reds_per_game']}")
-            print(f"  Referee Score: {ref_stats['referee_score']}/100 → {ref_stats['label']}")
-        else:
-            print("  Histórico do árbitro não disponível nesta amostra.")
-    else:
-        print("  Árbitro ainda não divulgado.")
 
-    # ── MÓDULO 8: ESCANTEIOS AVANÇADOS ──────────────────────────────
-    print("\n🏳️ V3-M8: MODELO AVANÇADO DE ESCANTEIOS")
+    # M8 — Escanteios
     adv_corners = calculate_advanced_corners(h_blended, a_blended, h_pi["index"], a_pi["index"])
-    print(f"  Expected Corners: {h_name} = {adv_corners['h_expected_corners']} | {a_name} = {adv_corners['a_expected_corners']}")
-    print(f"  Total Esperado: {adv_corners['total_expected']} | Corner Pressure: {adv_corners['corner_pressure']:+.1f}% ({'Mandante domina' if adv_corners['corner_pressure'] > 0 else 'Visitante domina'})")
-    print("  Probabilidades Over:")
-    for line_key, prob in adv_corners["probabilities"].items():
-        line = line_key.replace("over_", "").replace("_", ".")
-        if line.endswith("."):
-            line = line[:-1]
-        bar = "🟢" if prob > 0.60 else ("🟡" if prob > 0.40 else "🔴")
-        # Format: "75" -> "7.5", "85" -> "8.5" etc.
-        if len(line) >= 2:
-            display_line = line[:-1] + "." + line[-1]
-        else:
-            display_line = line
-        print(f"  {bar} Over {display_line}: {prob*100:.1f}%")
 
-    # ── MÓDULO 9: MONTE CARLO ────────────────────────────────────────
-    print("\n🎲 V3-M9: SIMULAÇÃO MONTE CARLO (100.000 partidas)")
-    elo_diff = elo_probs["elo_diff"]
-    mc_lh = xg_lh if xg_lh else h_blended.get("avg_gf", 1.2)
-    mc_la = xg_la if xg_la else a_blended.get("avg_gf", 0.9)
-    mc = run_monte_carlo(mc_lh, mc_la, n_simulations=100000,
-                          elo_weight=elo_diff,
-                          xg_lambda_home=xg_lh,
-                          xg_lambda_away=xg_la)
-    print(f"  Lambdas usados: {h_name}={mc['lambda_used']['home']} | {a_name}={mc['lambda_used']['away']}")
-    print(f"  Vitória {h_name}: {mc['home_win']*100:.1f}% | Empate: {mc['draw']*100:.1f}% | Vitória {a_name}: {mc['away_win']*100:.1f}%")
-    print(f"  BTTS: {mc['btts']*100:.1f}% | Over 1.5: {mc['over15']*100:.1f}% | Over 2.5: {mc['over25']*100:.1f}% | Over 3.5: {mc['over35']*100:.1f}%")
-    print(f"  Top 10 Placares:")
-    for i, (score, pct) in enumerate(mc["top_scores"][:10], 1):
-        print(f"    {i:2}. {score} → {pct:.2f}%")
-
-    mc_probs = {
-        "home_win": mc["home_win"], "draw": mc["draw"], "away_win": mc["away_win"],
-        "btts": mc["btts"], "over25": mc["over25"]
-    }
-
-    # ── MÓDULO 10: ML FEATURES ───────────────────────────────────────
-    print("\n🤖 V3-M10: MACHINE LEARNING (FEATURE EXTRACTION)")
-    h_rest_days = calculate_rest_days(h_hist[0]["fixture"]["date"][:10] if h_hist else None)
-    a_rest_days = calculate_rest_days(a_hist[0]["fixture"]["date"][:10] if a_hist else None)
-    ml_features = extract_ml_features(
-        h_blended, a_blended, h_elo, a_elo,
-        h_pi, a_pi, h_rest_days, a_rest_days,
-        real_odds, ref_stats
+    # M9 — Monte Carlo
+    mc = run_monte_carlo(
+        xg_lh if xg_lh else h_blended.get("avg_gf", 1.2),
+        xg_la if xg_la else a_blended.get("avg_gf", 0.9),
+        n_simulations=100000,
+        elo_weight=elo_probs["elo_diff"],
+        xg_lambda_home=xg_lh,
+        xg_lambda_away=xg_la,
     )
-    print(f"  Features extraídas: {len(ml_features)} variáveis")
-    print(f"  ELO Diff: {ml_features['elo_diff']:+.0f} | H Pressure: {ml_features['h_pressure']:.1f} | A Pressure: {ml_features['a_pressure']:.1f}")
-    print(f"  H xG: {ml_features['h_avg_gf']} | A xG: {ml_features['a_avg_gf']}")
-    ml_pred = ml_model_predict(ml_features)
-    if ml_pred:
-        print(f"  Predição ML: {ml_pred}")
-    else:
-        print("  Modelo ML pré-treinado: não carregado (pipeline pronto para integração)")
-    ml_probs = ml_pred  # None se não treinado
+    mc_probs = {"home_win": mc["home_win"], "draw": mc["draw"], "away_win": mc["away_win"],
+                "btts": mc["btts"], "over25": mc["over25"]}
 
-    # ── MÓDULO 11: CONFIDENCE SCORE ──────────────────────────────────
-    print("\n🎯 V3-M11: CONFIDENCE SCORE")
-    poisson_probs_dict = {
-        "home_win": xg_model_probs["home_win"],
-        "draw": xg_model_probs["draw"],
-        "away_win": xg_model_probs["away_win"]
-    }
-    data_quality = min(100, (min(len(h_hist), len(a_hist)) / 10.0) * 100 * 0.5
-                       + (50 if real_odds else 0) * 0.3 + 50 * 0.2)
+    # M10 — ML
+    h_rest = calculate_rest_days(h_hist[0]["fixture"]["date"][:10] if h_hist else None)
+    a_rest = calculate_rest_days(a_hist[0]["fixture"]["date"][:10] if a_hist else None)
+    ml_features = extract_ml_features(h_blended, a_blended, h_elo, a_elo, h_pi, a_pi,
+                                       h_rest, a_rest, real_odds, ref_stats)
+    ml_probs = ml_model_predict(ml_features)
+
+    # M11 — Confidence Score
+    data_quality = min(100,
+        (min(len(h_hist), len(a_hist)) / 10.0) * 100 * 0.5
+        + (50 if real_odds else 0) * 0.3 + 50 * 0.2)
     conf = calculate_confidence_score(
         len(h_hist), len(a_hist),
-        poisson_probs_dict, mc_probs,
-        real_odds, odds_movement_result, data_quality
-    )
-    print(f"  Confidence Score: {conf['score']}/100 → {conf['label']}")
-    for comp, val in conf["components"].items():
-        print(f"    • {comp}: {val:.1f}")
+        {"home_win": _hw, "draw": _dr, "away_win": _aw},
+        mc_probs, real_odds, odds_movement_result, data_quality)
 
-    # ── MÓDULO 12: ENSEMBLE / CONSENSO ───────────────────────────────
-    print("\n🏆 V3-M12: PROBABILIDADE FINAL (ENSEMBLE)")
-    poisson_full = xg_model_probs
-    xg_model_src = {"home_win": _hw, "draw": _dr, "away_win": _aw, "btts": _btts, "over25": _o25}
-    elo_src = {"home_win": elo_probs["home_win"], "draw": elo_probs["draw"], "away_win": elo_probs["away_win"]}
-
+    # M12 — Ensemble
     ensemble = calculate_ensemble_probability(
-        poisson_probs=poisson_full,
+        poisson_probs=xg_model_probs,
         mc_probs=mc_probs,
         ml_probs=ml_probs,
-        xg_probs=xg_model_src,
-        elo_probs=elo_src
+        xg_probs=xg_model_probs,
+        elo_probs={"home_win": elo_probs["home_win"], "draw": elo_probs["draw"],
+                   "away_win": elo_probs["away_win"]},
     )
 
-    if ensemble:
-        print(f"  Fontes usadas: {', '.join(ensemble['sources_used'])}")
-        print(f"  ╔══════════════════════════════════════════════╗")
-        print(f"  ║  PROBABILIDADE OFICIAL FINAL (ENSEMBLE V3)  ║")
-        print(f"  ╠══════════════════════════════════════════════╣")
-        print(f"  ║  Vitória {h_name:<18}: {ensemble['home_win']*100:>5.1f}%         ║")
-        print(f"  ║  Empate{'':<23}: {ensemble['draw']*100:>5.1f}%         ║")
-        print(f"  ║  Vitória {a_name:<18}: {ensemble['away_win']*100:>5.1f}%         ║")
-        if "btts" in ensemble:
-            print(f"  ║  BTTS{'':<25}: {ensemble['btts']*100:>5.1f}%         ║")
-        if "over25" in ensemble:
-            print(f"  ║  Over 2.5{'':<21}: {ensemble['over25']*100:>5.1f}%         ║")
-        print(f"  ╚══════════════════════════════════════════════╝")
-        print(f"  Confiança do Ensemble: {conf['score']}/100 — {conf['label']}")
+    # EV final com probabilidades do Ensemble
+    ev_final = {}
+    if real_odds and ensemble:
+        for side, odd_key in [("home_win","home"), ("draw","draw"), ("away_win","away")]:
+            prob = ensemble.get(side, 0)
+            odd  = real_odds.get(odd_key)
+            if odd:
+                ev_final[odd_key] = (prob * odd) - 1.0
 
-        # EV final com probabilidades do ensemble
-        if real_odds and ensemble:
-            print(f"\n  EV FINAL (baseado em probabilidades do Ensemble):")
-            for side, odd_key, name in [("home_win", "home", h_name), ("draw", "draw", "Empate"), ("away_win", "away", a_name)]:
-                prob = ensemble.get(side, 0)
-                odd = real_odds.get(odd_key)
-                if odd:
-                    ev = (prob * odd) - 1.0
-                    marker = "🔥" if ev > 0.15 else ("✅" if ev > 0.10 else ("📊" if ev > 0.05 else ("➕" if ev > 0 else "❌")))
-                    print(f"  {marker} {name}: EV = {ev*100:+.2f}% (Prob Ensemble: {prob*100:.1f}% | Odd: {odd})")
-    else:
-        print("  Ensemble não pôde ser calculado.")
+    # Renderiza painel final
+    _render_pre_game_dashboard(
+        h_name=h_name, a_name=a_name, fixture_id=fixture_id,
+        h_id=h_id, a_id=a_id,
+        h_form=h_form, a_form=a_form,
+        h2h_list=h2h_list,
+        h_blended=h_blended, a_blended=a_blended,
+        h_elo=h_elo, a_elo=a_elo, elo_probs=elo_probs,
+        h_pi=h_pi, a_pi=a_pi,
+        adv_corners=adv_corners,
+        mc=mc, ref_stats=ref_stats, real_referee=real_referee,
+        ensemble=ensemble, conf=conf,
+        ev_final=ev_final,
+        xg_lh=xg_lh, xg_la=xg_la,
+    )
 
-    print("\n" + "=" * 70)
-    print("✅ ANÁLISE V3 PRO CONCLUÍDA")
-    print("=" * 70)
     input("\nPressione ENTER para retornar ao menu da partida...")
+
 
 
 # =====================================================================
