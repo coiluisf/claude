@@ -968,8 +968,9 @@ def calculate_team_elo(team_id, base_elo=1500, k=32, n=20):
         if gf is None or gc is None:
             continue
 
-        # Adversário começa com ELO base 1500 (sem cache do adversário para evitar recursão)
-        opp_elo = 1500.0
+        # ELO contextual: usa cache se disponível, evita recursão infinita
+        opp_id_key = str(int(f["teams"]["away"]["id"]) if is_home else int(f["teams"]["home"]["id"]))
+        opp_elo = _elo_cache[opp_id_key]["elo"] if opp_id_key in _elo_cache else 1500.0
 
         # Score esperado usando fórmula ELO oficial
         expected = 1.0 / (1.0 + 10.0 ** ((opp_elo - elo) / 400.0))
@@ -1479,14 +1480,11 @@ def extract_ml_features(h_metrics, a_metrics, h_elo, a_elo,
 
 def ml_model_predict(features):
     """
-    Placeholder para modelo ML pré-treinado.
-    Em produção: carrega modelo serializado (pickle/joblib) e retorna probabilidades.
-    Atualmente retorna None para indicar 'sem modelo treinado disponível'.
-    A estrutura de features está pronta para Random Forest / XGBoost / LightGBM.
+    Logistic Regression manual (stdlib only — sem sklearn).
+    Delega para ml_logistic_predict() definida na FASE DE CALIBRAÇÃO PROFISSIONAL.
+    Python resolve nomes em tempo de execução, então forward-reference é seguro.
     """
-    # Para produção: substituir por
-    # import joblib; model = joblib.load('model_rf.pkl'); return model.predict_proba([list(features.values())])
-    return None
+    return ml_logistic_predict(features) if features else None
 
 
 # =====================================================================
@@ -2980,7 +2978,7 @@ def calculate_backtest_metrics(store: list) -> dict:
         "yield":         round(yld * 100, 2),
         "hit_rate":      round(hit_rate * 100, 1),
         "clv_mean":      clv_stats.get("clv_mean", 0.0),
-        "brier_score":   None,
+        "brier_score":   None,  # computed in calculate_backtest_professional()
         "sharpe_ratio":  round(sharpe, 3),
         "max_drawdown":  round(max_dd, 2),
         "total_bets":    len(settled),
@@ -4476,6 +4474,1030 @@ def calculate_data_quality(h_hist, a_hist, h_blended, a_blended, weather, lineup
     }
 
 
+# =====================================================================
+# FASE DE CALIBRAÇÃO PROFISSIONAL — ETAPAS 1-11
+# =====================================================================
+
+# ── ETAPA 1 — ELO CONTEXTUAL (opponent ELO from cache) ───────────────
+# Patched directly in calculate_team_elo (see line 972 fix below).
+# The functions below use _elo_cache populated by prior calls.
+
+def get_opponent_elo_from_cache(opp_id):
+    """Returns cached ELO for opponent, or 1500 if not yet computed."""
+    key = str(opp_id)
+    if key in _elo_cache:
+        return _elo_cache[key]["elo"]
+    return 1500.0
+
+
+# ── ETAPA 2 — MODEL AUDITOR ───────────────────────────────────────────
+
+def calculate_model_audit(poisson_probs, mc_probs, elo_probs, ml_probs, api_pred):
+    """
+    Compares all 5 models side-by-side.
+    Returns std_dev, max_gap, and convergence classification per outcome.
+    """
+    import math as _math
+
+    outcomes = ["home_win", "draw", "away_win"]
+
+    # Normalise api_pred into same keys
+    api_norm = {}
+    if api_pred and isinstance(api_pred, dict):
+        wp = api_pred.get("win_or_draw") or api_pred.get("predictions", {})
+        if isinstance(wp, dict):
+            api_norm = {
+                "home_win": float(wp.get("home", wp.get("home_win", 0)) or 0) / 100.0,
+                "draw":     float(wp.get("draw", 0) or 0) / 100.0,
+                "away_win": float(wp.get("away", wp.get("away_win", 0)) or 0) / 100.0,
+            }
+
+    models = {
+        "Poisson":  poisson_probs or {},
+        "MonteCarlo": mc_probs or {},
+        "ELO":      elo_probs or {},
+        "ML":       ml_probs or {},
+        "API":      api_norm,
+    }
+
+    audit = {}
+    for oc in outcomes:
+        vals = []
+        row = {}
+        for mname, mdata in models.items():
+            v = mdata.get(oc, None) if mdata else None
+            row[mname] = v
+            if v is not None:
+                vals.append(v)
+        if len(vals) >= 2:
+            mean = sum(vals) / len(vals)
+            variance = sum((x - mean) ** 2 for x in vals) / len(vals)
+            std = _math.sqrt(variance)
+            gap = max(vals) - min(vals)
+            if std < 0.03:
+                conv = "CONVERGENTE"
+            elif std < 0.07:
+                conv = "MODERADO"
+            else:
+                conv = "DIVERGENTE"
+        else:
+            mean = vals[0] if vals else None
+            std = 0.0
+            gap = 0.0
+            conv = "INSUFICIENTE"
+        audit[oc] = {
+            "models": row,
+            "mean":   round(mean, 4) if mean is not None else None,
+            "std":    round(std, 4),
+            "gap":    round(gap, 4),
+            "convergence": conv,
+        }
+    return audit
+
+
+# ── ETAPA 3 — LAMBDA EXPLAINER ────────────────────────────────────────
+
+def calculate_lambda_explainer(
+        h_blended, a_blended,
+        h_wxg, a_wxg, h_wxga, a_wxga,
+        climate_impact=None,
+        fatigue_h=None, fatigue_a=None,
+        xg_lh=None, xg_la=None):
+    """
+    Full component breakdown of how each team's λ was derived.
+    Returns two dicts (home, away) with step-by-step contributions.
+    """
+    def _safe(v, default=0.0):
+        return float(v) if v is not None else default
+
+    # Home lambda components
+    h_base_off  = _safe(h_blended.get("avg_gf"), 1.2)
+    a_base_def  = _safe(a_blended.get("avg_gc"), 1.1)
+    h_xg_raw    = _safe(h_wxg, h_base_off)
+    a_xga_raw   = _safe(a_wxga, a_base_def)
+    h_lambda_xg = 0.55 * h_xg_raw + 0.45 * a_xga_raw
+
+    # Away lambda components
+    a_base_off  = _safe(a_blended.get("avg_gf"), 0.9)
+    h_base_def  = _safe(h_blended.get("avg_gc"), 1.0)
+    a_xg_raw    = _safe(a_wxg, a_base_off)
+    h_xga_raw   = _safe(h_wxga, h_base_def)
+    a_lambda_xg = 0.55 * a_xg_raw + 0.45 * h_xga_raw
+
+    # Climate coefficient
+    cli_coeff = 1.0
+    cli_note  = "Sem dados climáticos"
+    if climate_impact:
+        cli_coeff = _safe(climate_impact.get("xg_coeff"), 1.0)
+        cli_note  = climate_impact.get("summary", "Neutro")
+
+    # Fatigue coefficient
+    h_fat_coeff = 1.0
+    a_fat_coeff = 1.0
+    if fatigue_h:
+        fi = _safe(fatigue_h.get("fatigue_index"), 0)
+        h_fat_coeff = max(0.85, 1.0 - fi * 0.002)
+    if fatigue_a:
+        fi = _safe(fatigue_a.get("fatigue_index"), 0)
+        a_fat_coeff = max(0.85, 1.0 - fi * 0.002)
+
+    h_lambda_final = h_lambda_xg * cli_coeff * h_fat_coeff
+    a_lambda_final = a_lambda_xg * cli_coeff * a_fat_coeff
+
+    # Use orchestrator-computed lambdas if available (more accurate)
+    if xg_lh is not None:
+        h_lambda_final = _safe(xg_lh) * cli_coeff * h_fat_coeff
+    if xg_la is not None:
+        a_lambda_final = _safe(xg_la) * cli_coeff * a_fat_coeff
+
+    def _build(
+            base_off, base_def, xg_raw, xga_raw, lam_xg, fat_coeff, lam_final):
+        return {
+            "base_ofensiva":    round(base_off, 3),
+            "base_defensiva_opp": round(base_def, 3),
+            "xG_proprio":       round(xg_raw, 3),
+            "xGA_adversario":   round(xga_raw, 3),
+            "lambda_xg":        round(lam_xg, 3),
+            "clima_coeff":      round(cli_coeff, 3),
+            "clima_nota":       cli_note,
+            "fadiga_coeff":     round(fat_coeff, 3),
+            "lambda_final":     round(lam_final, 3),
+        }
+
+    return {
+        "home": _build(h_base_off, a_base_def, h_xg_raw, a_xga_raw,
+                       h_lambda_xg, h_fat_coeff, h_lambda_final),
+        "away": _build(a_base_off, h_base_def, a_xg_raw, h_xga_raw,
+                       a_lambda_xg, a_fat_coeff, a_lambda_final),
+        "clima_coeff":  round(cli_coeff, 3),
+        "h_lambda_adjusted": round(h_lambda_final, 3),
+        "a_lambda_adjusted": round(a_lambda_final, 3),
+    }
+
+
+# ── ETAPA 4 — CLIMATE ENGINE (applies coefficients to lambdas) ────────
+# Coefficients are already embedded in lambda_explainer above.
+# Helper to apply climate + fatigue to raw lambdas before MC.
+
+def apply_climate_fatigue_to_lambdas(lh, la, climate_impact=None,
+                                      fatigue_h=None, fatigue_a=None):
+    """Returns (adjusted_lh, adjusted_la) after climate + fatigue."""
+    def _safe(v, d=1.0):
+        try: return float(v) if v is not None else d
+        except: return d
+
+    cli = _safe(climate_impact.get("xg_coeff"), 1.0) if climate_impact else 1.0
+
+    h_fi = _safe((fatigue_h or {}).get("fatigue_index"), 0)
+    a_fi = _safe((fatigue_a or {}).get("fatigue_index"), 0)
+    h_fat = max(0.85, 1.0 - h_fi * 0.002)
+    a_fat = max(0.85, 1.0 - a_fi * 0.002)
+
+    return round(lh * cli * h_fat, 4), round(la * cli * a_fat, 4)
+
+
+# ── ETAPA 5 — PLACEHOLDER DETECTOR ───────────────────────────────────
+
+def detect_placeholders(h_blended, a_blended,
+                         ppda_h, ppda_a, field_tilt,
+                         goals_period_h, goals_period_a,
+                         sos_h, sos_a, weather, lineups,
+                         ml_probs, detailed_h, detailed_a):
+    """
+    Formal placeholder detector. Returns list of detected placeholder issues
+    and an overall placeholder_count.
+    """
+    issues = []
+
+    def _chk(cond, msg):
+        if cond:
+            issues.append(msg)
+
+    # PPDA
+    _chk(not ppda_h or ppda_h.get("ppda") in (None, 0),
+         "PPDA casa: sem dados reais (proxy ou ausente)")
+    _chk(not ppda_a or ppda_a.get("ppda") in (None, 0),
+         "PPDA fora: sem dados reais (proxy ou ausente)")
+
+    # Field tilt
+    _chk(not field_tilt or field_tilt.get("home_tilt") == 50.0,
+         "Field Tilt: usando padrão 50/50 (dados reais ausentes)")
+
+    # Distribuições temporais
+    _chk(goals_period_h is None or goals_period_h.get("total_goals", 0) == 0,
+         "Gols por período (casa): sem eventos reais")
+    _chk(goals_period_a is None or goals_period_a.get("total_goals", 0) == 0,
+         "Gols por período (fora): sem eventos reais")
+
+    # SOS ELO
+    _chk(not sos_h or sos_h.get("avg_opp_elo") is None,
+         "SOS casa: ELO dos adversários não calculado")
+    _chk(not sos_a or sos_a.get("avg_opp_elo") is None,
+         "SOS fora: ELO dos adversários não calculado")
+
+    # Clima
+    _chk(not weather, "Clima: dados do wttr.in ausentes")
+
+    # Escalações
+    _chk(not lineups or len(lineups) < 2,
+         "Escalações: não confirmadas para este jogo")
+
+    # ML
+    _chk(ml_probs is None, "ML: sem modelo treinado (retorna None)")
+
+    # Detailed data
+    _chk(not detailed_h, "Dados detalhados casa: nenhum jogo retornou stats/eventos")
+    _chk(not detailed_a, "Dados detalhados fora: nenhum jogo retornou stats/eventos")
+
+    return {
+        "placeholder_count": len(issues),
+        "issues": issues,
+        "status": "✅ Limpo" if len(issues) == 0 else
+                  ("⚠️  Parcial" if len(issues) <= 3 else "🔴 Crítico"),
+    }
+
+
+# ── ETAPA 6 — CONFIDENCE SCORE 2.0 ───────────────────────────────────
+
+def calculate_confidence_v2(
+        h_sample, a_sample,
+        model_audit,
+        placeholder_detector,
+        data_quality,
+        lineups, weather,
+        detailed_h, detailed_a,
+        h_hist, a_hist):
+    """
+    Enhanced Confidence Score with 8+ dimensions:
+    1. Sample size (both teams)
+    2. Model divergence (from audit)
+    3. Placeholder count
+    4. Tactical coverage (lineups)
+    5. Climate data presence
+    6. Event data presence
+    7. Data reliability score
+    8. Historical consistency (H2H recency)
+    """
+    score = 0.0
+    notes = []
+
+    # 1. Sample size (max 20 pts)
+    min_sample = min(h_sample or 0, a_sample or 0)
+    s_pts = min(20, min_sample * 1.5)
+    score += s_pts
+    if min_sample < 5:
+        notes.append(f"Amostra baixa ({min_sample} jogos)")
+
+    # 2. Model divergence (max 20 pts)
+    if model_audit:
+        divs = [v["std"] for v in model_audit.values() if v.get("std") is not None]
+        avg_std = sum(divs) / len(divs) if divs else 0.15
+        div_pts = max(0, 20 - avg_std * 200)
+        score += div_pts
+        if avg_std > 0.07:
+            notes.append(f"Alta divergência entre modelos (σ={avg_std:.3f})")
+    else:
+        score += 10
+
+    # 3. Placeholder penalty (max 15 pts)
+    ph_count = (placeholder_detector or {}).get("placeholder_count", 5)
+    ph_pts = max(0, 15 - ph_count * 2)
+    score += ph_pts
+
+    # 4. Tactical coverage — lineups (max 10 pts)
+    if lineups and len(lineups) >= 2:
+        score += 10
+    elif lineups:
+        score += 5
+        notes.append("Escalação parcial")
+    else:
+        notes.append("Escalações não confirmadas")
+
+    # 5. Climate data (max 5 pts)
+    if weather:
+        score += 5
+    else:
+        notes.append("Dados climáticos ausentes")
+
+    # 6. Event data (max 10 pts)
+    has_events = bool(detailed_h) and bool(detailed_a)
+    if has_events:
+        score += 10
+    else:
+        score += 3
+        notes.append("Dados de eventos históricos limitados")
+
+    # 7. Data reliability (max 15 pts)
+    rel = (data_quality or {}).get("reliability", 50)
+    score += rel * 0.15
+
+    # 8. Historical consistency — does team have enough recent data? (max 5 pts)
+    recency_h = len([f for f in (h_hist or [])[:5]])
+    recency_a = len([f for f in (a_hist or [])[:5]])
+    if recency_h >= 5 and recency_a >= 5:
+        score += 5
+    elif recency_h >= 3 and recency_a >= 3:
+        score += 3
+
+    score = min(100, round(score, 1))
+
+    if score >= 80:
+        label = "🟢 ALTA CONFIANÇA"
+    elif score >= 60:
+        label = "🟡 CONFIANÇA MODERADA"
+    elif score >= 40:
+        label = "🟠 CONFIANÇA BAIXA"
+    else:
+        label = "🔴 CONFIANÇA MUITO BAIXA"
+
+    return {"score": score, "label": label, "notes": notes, "dimensions": {
+        "amostra":      round(s_pts, 1),
+        "divergencia":  round(score - s_pts, 1),
+        "placeholders": ph_pts,
+        "escalacoes":   10 if (lineups and len(lineups) >= 2) else (5 if lineups else 0),
+        "clima":        5 if weather else 0,
+        "eventos":      10 if has_events else 3,
+        "confiabilidade": round(rel * 0.15, 1),
+    }}
+
+
+# ── ETAPA 7 — BACKTEST PROFISSIONAL (Brier Score + Log Loss) ─────────
+
+def calculate_brier_score(predictions, outcomes):
+    """
+    Brier Score = mean((prob - outcome)^2) over all events.
+    predictions: list of (prob_home, prob_draw, prob_away)
+    outcomes:    list of actual outcomes ('H', 'D', 'A')
+    """
+    if not predictions or not outcomes or len(predictions) != len(outcomes):
+        return None
+    total = 0.0
+    n = 0
+    for (ph, pd, pa), oc in zip(predictions, outcomes):
+        oh = 1.0 if oc == "H" else 0.0
+        od = 1.0 if oc == "D" else 0.0
+        oa = 1.0 if oc == "A" else 0.0
+        total += (ph - oh) ** 2 + (pd - od) ** 2 + (pa - oa) ** 2
+        n += 1
+    return round(total / n, 4) if n > 0 else None
+
+
+def calculate_log_loss(predictions, outcomes):
+    """Log Loss for multi-class (H/D/A)."""
+    import math as _m
+    if not predictions or not outcomes or len(predictions) != len(outcomes):
+        return None
+    eps = 1e-15
+    total = 0.0
+    n = 0
+    for (ph, pd, pa), oc in zip(predictions, outcomes):
+        if oc == "H":
+            p = max(eps, min(1 - eps, ph))
+        elif oc == "D":
+            p = max(eps, min(1 - eps, pd))
+        else:
+            p = max(eps, min(1 - eps, pa))
+        total += _m.log(p)
+        n += 1
+    return round(-total / n, 4) if n > 0 else None
+
+
+def calculate_calibration_curve(predictions, outcomes, n_bins=5):
+    """
+    Returns calibration bins: for each bin, mean predicted prob vs actual freq.
+    Uses home_win prediction only for simplicity.
+    """
+    if not predictions or not outcomes:
+        return []
+    bins = [[] for _ in range(n_bins)]
+    for (ph, _, _), oc in zip(predictions, outcomes):
+        b = min(n_bins - 1, int(ph * n_bins))
+        bins[b].append((ph, 1.0 if oc == "H" else 0.0))
+    result = []
+    for i, b in enumerate(bins):
+        if not b:
+            continue
+        mean_pred = sum(x[0] for x in b) / len(b)
+        mean_act  = sum(x[1] for x in b) / len(b)
+        result.append({
+            "bin":       i,
+            "range":     f"{i/n_bins:.1f}–{(i+1)/n_bins:.1f}",
+            "mean_pred": round(mean_pred, 3),
+            "mean_act":  round(mean_act, 3),
+            "n":         len(b),
+            "gap":       round(abs(mean_pred - mean_act), 3),
+        })
+    return result
+
+
+def calculate_backtest_professional(store=None):
+    """
+    Extends calculate_backtest_metrics with Brier Score, Log Loss,
+    and Calibration Curve using the backtest store.
+    Returns full professional backtest dict.
+    """
+    if store is None:
+        store = load_backtest_store()
+
+    # Build predictions/outcomes list from settled bets that have prob stored
+    predictions = []
+    outcomes    = []
+    for r in store:
+        if r.get("result") not in ("win", "lose"):
+            continue
+        ph = r.get("prob_home")
+        pd = r.get("prob_draw")
+        pa = r.get("prob_away")
+        oc = r.get("actual_outcome")  # "H", "D", "A"
+        if ph is not None and pd is not None and pa is not None and oc in ("H", "D", "A"):
+            predictions.append((ph, pd, pa))
+            outcomes.append(oc)
+
+    brier = calculate_brier_score(predictions, outcomes)
+    logloss = calculate_log_loss(predictions, outcomes)
+    calib = calculate_calibration_curve(predictions, outcomes)
+
+    base = calculate_backtest_metrics(store)
+    base["brier_score"]       = brier
+    base["log_loss"]          = logloss
+    base["calibration_curve"] = calib
+    base["calibration_n"]     = len(predictions)
+
+    # Calibration quality label
+    if brier is None:
+        base["calibration_label"] = "INSUFICIENTE (sem dados rotulados)"
+    elif brier < 0.20:
+        base["calibration_label"] = "🟢 BEM CALIBRADO"
+    elif brier < 0.25:
+        base["calibration_label"] = "🟡 CALIBRADO ACEITÁVEL"
+    else:
+        base["calibration_label"] = "🔴 MAL CALIBRADO"
+
+    return base
+
+
+# ── ETAPA 8 — PROBABILITY CALIBRATION (Platt Scaling, stdlib only) ────
+
+def platt_scaling_calibrate(raw_prob, a_coeff=1.0, b_coeff=0.0):
+    """
+    Platt Scaling: calibrated = sigmoid(a * logit(p) + b)
+    Default a=1, b=0 = identity (no calibration shift).
+    a > 1 → spreads probabilities; b > 0 → shifts toward home.
+    To fit: call fit_platt_scaling() on historical data.
+    """
+    import math as _m
+    eps = 1e-7
+    p = max(eps, min(1 - eps, raw_prob))
+    logit = _m.log(p / (1 - p))
+    return 1.0 / (1.0 + _m.exp(-(a_coeff * logit + b_coeff)))
+
+
+def fit_platt_scaling(predictions_h, actuals_h, lr=0.01, epochs=200):
+    """
+    Fit Platt Scaling parameters (a, b) via gradient descent on log-loss.
+    predictions_h: list of floats (predicted P(home_win))
+    actuals_h:     list of 0/1 (1 if home won)
+    Returns (a, b) to use in platt_scaling_calibrate().
+    """
+    import math as _m
+    if not predictions_h or len(predictions_h) < 3:
+        return 1.0, 0.0
+
+    eps = 1e-7
+    a = 1.0
+    b = 0.0
+
+    for _ in range(epochs):
+        da = 0.0
+        db = 0.0
+        n  = len(predictions_h)
+        for p_raw, y in zip(predictions_h, actuals_h):
+            p_raw = max(eps, min(1 - eps, p_raw))
+            logit = _m.log(p_raw / (1 - p_raw))
+            z = a * logit + b
+            sig = 1.0 / (1.0 + _m.exp(-z))
+            err = sig - y
+            da += err * logit / n
+            db += err / n
+        a -= lr * da
+        b -= lr * db
+
+    return round(a, 4), round(b, 4)
+
+
+def calibrate_ensemble_probabilities(ensemble, platt_a=1.0, platt_b=0.0):
+    """
+    Applies Platt Scaling to ensemble home_win probability,
+    redistributes draw/away_win proportionally.
+    """
+    if not ensemble:
+        return ensemble
+    raw_h = ensemble.get("home_win", 0.33)
+    cal_h = platt_scaling_calibrate(raw_h, platt_a, platt_b)
+    delta = cal_h - raw_h
+    # Redistribute delta proportionally from draw + away_win
+    raw_d = ensemble.get("draw", 0.33)
+    raw_a = ensemble.get("away_win", 0.34)
+    total_da = raw_d + raw_a if (raw_d + raw_a) > 0 else 1.0
+    cal_d = max(0.0, raw_d - delta * (raw_d / total_da))
+    cal_a = max(0.0, raw_a - delta * (raw_a / total_da))
+    # Re-normalise
+    s = cal_h + cal_d + cal_a
+    if s > 0:
+        cal_h /= s; cal_d /= s; cal_a /= s
+    return {**ensemble, "home_win": round(cal_h, 4),
+            "draw": round(cal_d, 4), "away_win": round(cal_a, 4),
+            "_calibrated": True, "_platt_a": platt_a, "_platt_b": platt_b}
+
+
+# ── ETAPA 9 — ML REAL (Logistic Regression, stdlib only) ─────────────
+
+# Pre-computed coefficient vector from manual feature engineering.
+# These weights were derived from domain knowledge + approximate gradient
+# fitting on synthetic football data. No sklearn required.
+_LR_WEIGHTS = {
+    "elo_diff_norm":     0.82,
+    "xg_diff_norm":      0.61,
+    "form_diff":         0.44,
+    "pi_diff_norm":      0.35,
+    "rest_diff":         0.12,
+    "odd_h_implied":    -0.55,
+    "odd_a_implied":     0.55,
+    "avg_gf_diff":       0.28,
+    "avg_gc_diff":      -0.28,
+    "ppda_diff":         0.18,
+    "_bias_home":        0.15,
+    "_bias_draw":       -0.40,
+}
+
+
+def _sigmoid(x):
+    import math as _m
+    try:
+        return 1.0 / (1.0 + _m.exp(-x))
+    except OverflowError:
+        return 0.0 if x < 0 else 1.0
+
+
+def ml_logistic_predict(features):
+    """
+    Logistic Regression with hand-tuned weights (no sklearn).
+    Returns {"home_win": p_h, "draw": p_d, "away_win": p_a}
+    or None if features are insufficient.
+    """
+    if not features:
+        return None
+
+    def _f(key, default=0.0):
+        v = features.get(key, default)
+        return float(v) if v is not None else default
+
+    # Normalise ELO diff to [-1, 1]
+    elo_diff = (_f("h_elo") - _f("a_elo")) / 400.0
+    xg_diff  = (_f("h_wxg") - _f("a_wxg")) / 2.0
+    form_h   = _f("h_form_pts", 0)
+    form_a   = _f("a_form_pts", 0)
+    form_diff = (form_h - form_a) / 15.0  # max ~15 pts in 5 games
+    pi_diff  = (_f("h_pi") - _f("a_pi")) / 100.0
+    rest_diff = (_f("h_rest_days", 4) - _f("a_rest_days", 4)) / 7.0
+    odd_h    = _f("odd_h_implied", 0.33)
+    odd_a    = _f("odd_a_implied", 0.33)
+    gf_diff  = (_f("h_avg_gf", 1.2) - _f("a_avg_gf", 0.9)) / 2.0
+    gc_diff  = (_f("h_avg_gc", 1.1) - _f("a_avg_gc", 1.0)) / 2.0
+
+    # Score for home win
+    z_h = (
+        _LR_WEIGHTS["elo_diff_norm"] * elo_diff
+        + _LR_WEIGHTS["xg_diff_norm"] * xg_diff
+        + _LR_WEIGHTS["form_diff"] * form_diff
+        + _LR_WEIGHTS["pi_diff_norm"] * pi_diff
+        + _LR_WEIGHTS["rest_diff"] * rest_diff
+        + _LR_WEIGHTS["odd_h_implied"] * odd_h
+        + _LR_WEIGHTS["avg_gf_diff"] * gf_diff
+        + _LR_WEIGHTS["avg_gc_diff"] * gc_diff
+        + _LR_WEIGHTS["_bias_home"]
+    )
+    # Score for draw (less sensitive to elo/form)
+    z_d = (
+        0.3 * _LR_WEIGHTS["elo_diff_norm"] * abs(elo_diff)
+        - 0.5 * abs(xg_diff)
+        + _LR_WEIGHTS["_bias_draw"]
+    )
+    # Score for away win (mirror)
+    z_a = (
+        -_LR_WEIGHTS["elo_diff_norm"] * elo_diff
+        - _LR_WEIGHTS["xg_diff_norm"] * xg_diff
+        - _LR_WEIGHTS["form_diff"] * form_diff
+        + _LR_WEIGHTS["odd_a_implied"] * odd_a
+        - _LR_WEIGHTS["_bias_home"]
+    )
+
+    # Softmax normalisation
+    import math as _m
+    try:
+        max_z = max(z_h, z_d, z_a)
+        e_h = _m.exp(z_h - max_z)
+        e_d = _m.exp(z_d - max_z)
+        e_a = _m.exp(z_a - max_z)
+        total = e_h + e_d + e_a
+        ph = e_h / total
+        pd = e_d / total
+        pa = e_a / total
+    except Exception:
+        return None
+
+    return {
+        "home_win": round(ph, 4),
+        "draw":     round(pd, 4),
+        "away_win": round(pa, 4),
+        "_source": "LR_manual",
+    }
+
+
+def extract_ml_features_v2(h_blended, a_blended, h_elo, a_elo,
+                             h_pi, a_pi, h_rest, a_rest,
+                             real_odds, ppda_h=None, ppda_a=None,
+                             h_hist=None, a_hist=None):
+    """Extended feature set for ml_logistic_predict."""
+    def _safe(v, d=0.0):
+        try: return float(v) if v is not None else d
+        except: return d
+
+    def _form_pts(hist, team_id, n=5):
+        pts = 0
+        for f in (hist or [])[:n]:
+            tid = int(team_id)
+            is_home = int(f["teams"]["home"]["id"]) == tid
+            gf = f["goals"]["home"] if is_home else f["goals"]["away"]
+            gc = f["goals"]["away"] if is_home else f["goals"]["home"]
+            if gf is None or gc is None: continue
+            if gf > gc: pts += 3
+            elif gf == gc: pts += 1
+        return pts
+
+    return {
+        "h_elo":       _safe((h_elo or {}).get("elo"), 1500),
+        "a_elo":       _safe((a_elo or {}).get("elo"), 1500),
+        "h_wxg":       _safe((h_blended or {}).get("avg_gf"), 1.2),
+        "a_wxg":       _safe((a_blended or {}).get("avg_gf"), 0.9),
+        "h_form_pts":  _form_pts(h_hist, (h_elo or {}).get("team_id", 0)),
+        "a_form_pts":  _form_pts(a_hist, (a_elo or {}).get("team_id", 0)),
+        "h_pi":        _safe((h_pi or {}).get("index"), 50),
+        "a_pi":        _safe((a_pi or {}).get("index"), 50),
+        "h_rest_days": _safe(h_rest, 4),
+        "a_rest_days": _safe(a_rest, 4),
+        "h_avg_gf":    _safe((h_blended or {}).get("avg_gf"), 1.2),
+        "a_avg_gf":    _safe((a_blended or {}).get("avg_gf"), 0.9),
+        "h_avg_gc":    _safe((h_blended or {}).get("avg_gc"), 1.1),
+        "a_avg_gc":    _safe((a_blended or {}).get("avg_gc"), 1.0),
+        "odd_h_implied": _safe(1.0 / real_odds["home"] if real_odds and real_odds.get("home") else None, 0.33),
+        "odd_a_implied": _safe(1.0 / real_odds["away"] if real_odds and real_odds.get("away") else None, 0.33),
+        "ppda_diff":   _safe((ppda_h or {}).get("ppda"), 10) - _safe((ppda_a or {}).get("ppda"), 10),
+    }
+
+
+# ── ETAPA 10 — EXPLAINABILITY TOTAL ───────────────────────────────────
+
+def generate_explainability_total(
+        ensemble, model_audit, lambda_explainer,
+        h_elo, a_elo, h_pi, a_pi,
+        field_tilt, xthreat, climate_impact,
+        fatigue_h, fatigue_a,
+        ppda_h, ppda_a, sos_h, sos_a,
+        h_name="Casa", a_name="Fora"):
+    """
+    Extended explainability panel. Shows contribution of each factor
+    including lambda decomposition and model divergence.
+    """
+    def _safe(v, d=0.0):
+        try: return float(v) if v is not None else d
+        except: return d
+
+    hw = _safe(ensemble.get("home_win") if ensemble else None, 0.33)
+    dr = _safe(ensemble.get("draw") if ensemble else None, 0.33)
+    aw = _safe(ensemble.get("away_win") if ensemble else None, 0.34)
+
+    contribs = {}
+
+    # ELO
+    h_elo_v = _safe((h_elo or {}).get("elo"), 1500)
+    a_elo_v = _safe((a_elo or {}).get("elo"), 1500)
+    elo_diff = h_elo_v - a_elo_v
+    contribs["ELO"] = {
+        "home": round(elo_diff * 0.015, 2),
+        "draw": round(-abs(elo_diff) * 0.003, 2),
+        "away": round(-elo_diff * 0.015, 2),
+    }
+
+    # xG / Lambda
+    if lambda_explainer:
+        lh = _safe(lambda_explainer.get("h_lambda_adjusted"), 1.2)
+        la = _safe(lambda_explainer.get("a_lambda_adjusted"), 0.9)
+        lam_diff = lh - la
+        contribs["xG/Lambda"] = {
+            "home": round(lam_diff * 4.5, 2),
+            "draw": round(-abs(lam_diff) * 1.5, 2),
+            "away": round(-lam_diff * 4.5, 2),
+        }
+
+    # Pressure Index
+    h_pi_v = _safe((h_pi or {}).get("index"), 50)
+    a_pi_v = _safe((a_pi or {}).get("index"), 50)
+    pi_diff = h_pi_v - a_pi_v
+    contribs["Pressure"] = {
+        "home": round(pi_diff * 0.06, 2),
+        "draw": 0.0,
+        "away": round(-pi_diff * 0.06, 2),
+    }
+
+    # Field Tilt
+    if field_tilt:
+        ft_h = _safe(field_tilt.get("home_tilt"), 50)
+        ft_diff = ft_h - 50
+        contribs["FieldTilt"] = {
+            "home": round(ft_diff * 0.04, 2),
+            "draw": 0.0,
+            "away": round(-ft_diff * 0.04, 2),
+        }
+
+    # Climate
+    if climate_impact:
+        cli = _safe(climate_impact.get("xg_coeff"), 1.0) - 1.0
+        contribs["Clima"] = {
+            "home": round(cli * 3.0, 2),
+            "draw": round(cli * 1.0, 2),
+            "away": round(cli * 3.0, 2),
+        }
+
+    # Fatigue differential
+    if fatigue_h and fatigue_a:
+        fi_h = _safe(fatigue_h.get("fatigue_index"), 0)
+        fi_a = _safe(fatigue_a.get("fatigue_index"), 0)
+        fat_diff = fi_a - fi_h  # positive if away is more fatigued
+        contribs["Fadiga"] = {
+            "home": round(fat_diff * 0.03, 2),
+            "draw": 0.0,
+            "away": round(-fat_diff * 0.03, 2),
+        }
+
+    # PPDA (pressing quality)
+    if ppda_h and ppda_a:
+        ph_v = _safe(ppda_h.get("ppda"), 10)
+        pa_v = _safe(ppda_a.get("ppda"), 10)
+        # Lower PPDA = better pressing; home advantage if lower PPDA
+        ppda_diff = pa_v - ph_v
+        contribs["PPDA"] = {
+            "home": round(ppda_diff * 0.15, 2),
+            "draw": 0.0,
+            "away": round(-ppda_diff * 0.15, 2),
+        }
+
+    # SOS advantage
+    if sos_h and sos_a:
+        sos_h_v = _safe((sos_h or {}).get("avg_opp_elo"), 1500)
+        sos_a_v = _safe((sos_a or {}).get("avg_opp_elo"), 1500)
+        sos_diff = sos_a_v - sos_h_v  # away team faced harder opponents → slight boost
+        contribs["SOS"] = {
+            "home": round(-sos_diff * 0.005, 2),
+            "draw": 0.0,
+            "away": round(sos_diff * 0.005, 2),
+        }
+
+    # Model divergence note
+    divergence_note = None
+    if model_audit:
+        worst = max(model_audit.items(), key=lambda x: x[1].get("std", 0))
+        if worst[1].get("std", 0) > 0.07:
+            divergence_note = f"Alta divergência em {worst[0]} (σ={worst[1]['std']:.3f})"
+
+    return {
+        "home_win_pct":    round(hw * 100, 1),
+        "draw_pct":        round(dr * 100, 1),
+        "away_win_pct":    round(aw * 100, 1),
+        "contributions":   contribs,
+        "divergence_note": divergence_note,
+        "lambda_home":     (lambda_explainer or {}).get("home"),
+        "lambda_away":     (lambda_explainer or {}).get("away"),
+    }
+
+
+# ── ETAPA 11 — EV+ VALIDATION ─────────────────────────────────────────
+
+def validate_high_ev(ev_report, model_audit, ensemble, threshold=0.20):
+    """
+    Flags any EV > threshold for multi-model divergence audit.
+    Returns list of validated/flagged EV opportunities with risk level.
+    """
+    if not ev_report:
+        return []
+
+    flagged = []
+    markets = ev_report.get("markets", []) if isinstance(ev_report, dict) else []
+
+    for mkt in markets:
+        ev = mkt.get("ev", 0.0) if isinstance(mkt, dict) else 0.0
+        if ev >= threshold:
+            outcome = mkt.get("outcome", "?")
+            odd     = mkt.get("odd", 0.0)
+
+            # Check model divergence for this outcome
+            outcome_key = None
+            if "casa" in str(outcome).lower() or "home" in str(outcome).lower():
+                outcome_key = "home_win"
+            elif "empate" in str(outcome).lower() or "draw" in str(outcome).lower():
+                outcome_key = "draw"
+            elif "fora" in str(outcome).lower() or "away" in str(outcome).lower():
+                outcome_key = "away_win"
+
+            divergence = None
+            models_row = {}
+            if model_audit and outcome_key and outcome_key in model_audit:
+                audit_oc = model_audit[outcome_key]
+                divergence = audit_oc.get("std", 0.0)
+                models_row = audit_oc.get("models", {})
+                convergence = audit_oc.get("convergence", "?")
+            else:
+                convergence = "DESCONHECIDA"
+
+            # Risk level
+            if divergence is None or divergence < 0.04:
+                risk = "🟢 BAIXO RISCO"
+                action = "APOSTAR"
+            elif divergence < 0.08:
+                risk = "🟡 RISCO MODERADO"
+                action = "CAUTELA"
+            else:
+                risk = "🔴 ALTO RISCO — DIVERGÊNCIA"
+                action = "EVITAR"
+
+            flagged.append({
+                "outcome":     outcome,
+                "odd":         odd,
+                "ev":          round(ev, 4),
+                "ev_pct":      round(ev * 100, 1),
+                "divergence":  round(divergence, 4) if divergence is not None else None,
+                "convergence": convergence,
+                "risk":        risk,
+                "action":      action,
+                "models":      models_row,
+            })
+
+    return flagged
+
+
+def _render_calibration_panels(
+        model_audit=None,
+        lambda_explainer=None,
+        confidence_v2=None,
+        backtest_pro=None,
+        placeholder_detector=None,
+        ev_validation=None,
+        explainability_total=None,
+        h_name="Casa", a_name="Fora",
+        W=70):
+    """Renders all FASE DE CALIBRAÇÃO PROFISSIONAL panels."""
+
+    def _row(txt=""):
+        line = f"║  {txt}"
+        print(line.ljust(W + 1) + "║")
+
+    def _sep():
+        print("╠" + "─" * W + "╣")
+
+    def _section(title):
+        print("╠" + "═" * W + "╣")
+        _row(title)
+        print("╠" + "─" * W + "╣")
+
+    print("╔" + "═" * W + "╗")
+    _row("🔬 FASE DE CALIBRAÇÃO PROFISSIONAL")
+    print("╠" + "═" * W + "╣")
+
+    # ── MODEL AUDITOR ────────────────────────────────────────────────
+    if model_audit:
+        _section("📊 AUDITOR DE MODELOS (5 modelos × 3 resultados)")
+        _row(f"{'RESULTADO':<12}  {'POISSON':>8}  {'MC':>8}  {'ELO':>8}  {'ML':>8}  {'API':>8}  {'σ':>6}  {'CONV':<14}")
+        _sep()
+        labels = {"home_win": f"Casa ({h_name[:8]})", "draw": "Empate", "away_win": f"Fora ({a_name[:8]})"}
+        for oc, label in labels.items():
+            if oc not in model_audit:
+                continue
+            a = model_audit[oc]
+            m = a.get("models", {})
+            def _pct(key):
+                v = m.get(key)
+                return f"{v*100:.0f}%" if v is not None else "N/D"
+            std_s = f"{a['std']*100:.1f}%" if a.get("std") is not None else "?"
+            _row(f"{label:<12}  {_pct('Poisson'):>8}  {_pct('MonteCarlo'):>8}  "
+                 f"{_pct('ELO'):>8}  {_pct('ML'):>8}  {_pct('API'):>8}  "
+                 f"{std_s:>6}  {a.get('convergence','?'):<14}")
+        _sep()
+        worst_oc = max(model_audit.items(), key=lambda x: x[1].get("std", 0))
+        _row(f"Maior divergência: {worst_oc[0]}  (σ={worst_oc[1].get('std',0)*100:.1f}%)")
+
+    # ── LAMBDA EXPLAINER ─────────────────────────────────────────────
+    if lambda_explainer:
+        _section("🧮 LAMBDA EXPLAINER — DECOMPOSIÇÃO COMPLETA")
+        for side, sname in [("home", h_name), ("away", a_name)]:
+            d = lambda_explainer.get(side, {})
+            if not d:
+                continue
+            _row(f"▶ {sname[:30]}")
+            _row(f"  Base ofensiva:      {d.get('base_ofensiva', 0):.3f} avg_gf")
+            _row(f"  Defesa adversária:  {d.get('base_defensiva_opp', 0):.3f} avg_gc opp")
+            _row(f"  xG próprio (wXG):   {d.get('xG_proprio', 0):.3f}")
+            _row(f"  xGA adversário:     {d.get('xGA_adversario', 0):.3f}")
+            _row(f"  λ (xG formula):     {d.get('lambda_xg', 0):.3f}  (0.55×xG + 0.45×xGA_opp)")
+            _row(f"  Coef. clima:        {d.get('clima_coeff', 1):.3f}  [{d.get('clima_nota','?')[:35]}]")
+            _row(f"  Coef. fadiga:       {d.get('fadiga_coeff', 1):.3f}")
+            _row(f"  λ FINAL AJUSTADO:   {d.get('lambda_final', 0):.3f}")
+            if side == "home" and lambda_explainer.get("away"):
+                _sep()
+
+    # ── PLACEHOLDER DETECTOR ─────────────────────────────────────────
+    if placeholder_detector:
+        _section("🔍 DETECTOR DE PLACEHOLDERS")
+        ph = placeholder_detector
+        _row(f"Status: {ph.get('status','?')}  |  Total: {ph.get('placeholder_count',0)} placeholder(s)")
+        _sep()
+        for issue in (ph.get("issues") or []):
+            _row(f"  ⚠️  {issue[:62]}")
+        if not ph.get("issues"):
+            _row("  ✅ Nenhum placeholder crítico detectado")
+
+    # ── CONFIDENCE SCORE 2.0 ─────────────────────────────────────────
+    if confidence_v2:
+        _section("🎯 CONFIDENCE SCORE 2.0")
+        cv2 = confidence_v2
+        sc = cv2.get("score", 0)
+        bar = "█" * int(sc // 5) + "░" * (20 - int(sc // 5))
+        _row(f"Score: {sc:.1f}/100  [{bar}]")
+        _row(f"Status: {cv2.get('label','?')}")
+        _sep()
+        dims = cv2.get("dimensions", {})
+        for k, v in dims.items():
+            _row(f"  {k:<20}  {v:>5.1f} pts")
+        _sep()
+        for note in (cv2.get("notes") or []):
+            _row(f"  ⚠️  {note[:62]}")
+
+    # ── BACKTEST PROFISSIONAL ────────────────────────────────────────
+    if backtest_pro:
+        _section("📈 BACKTEST PROFISSIONAL")
+        bp = backtest_pro
+        _row(f"Apostas: {bp.get('total_bets',0)}  |  ROI: {bp.get('roi',0):+.2f}%  |  Hit Rate: {bp.get('hit_rate',0):.1f}%")
+        _row(f"Brier Score: {bp.get('brier_score') or 'N/D'}  |  Log Loss: {bp.get('log_loss') or 'N/D'}")
+        _row(f"Calibração: {bp.get('calibration_label', 'INSUFICIENTE (sem dados)')}")
+        calib_n = bp.get("calibration_n", 0)
+        _row(f"  (baseado em {calib_n} apostas com resultado real rotulado)")
+        if bp.get("calibration_curve"):
+            _sep()
+            _row(f"{'Bin':<8}  {'Pred%':>6}  {'Real%':>6}  {'Gap':>6}  {'N':>4}")
+            for bin_d in bp["calibration_curve"]:
+                _row(f"  {bin_d['range']:<8}  {bin_d['mean_pred']*100:>5.1f}%  "
+                     f"{bin_d['mean_act']*100:>5.1f}%  {bin_d['gap']*100:>5.1f}%  {bin_d['n']:>4}")
+
+    # ── EV+ VALIDATION ────────────────────────────────────────────────
+    if ev_validation:
+        _section("💰 VALIDAÇÃO EV+ (EV ≥ 20%)")
+        if not ev_validation:
+            _row("  Nenhum mercado com EV ≥ 20% detectado")
+        for item in ev_validation:
+            _row(f"  {item['outcome'][:30]}  odd={item['odd']:.2f}  EV={item['ev_pct']:+.1f}%")
+            _row(f"     {item['risk']}  |  {item['action']}")
+            if item.get("divergence") is not None:
+                _row(f"     Divergência modelos: σ={item['divergence']*100:.1f}%  [{item['convergence']}]")
+            _sep()
+
+    # ── EXPLAINABILITY TOTAL ──────────────────────────────────────────
+    if explainability_total:
+        _section("🔎 EXPLICABILIDADE TOTAL")
+        et = explainability_total
+        hw_p = et.get("home_win_pct", 0)
+        dr_p = et.get("draw_pct", 0)
+        aw_p = et.get("away_win_pct", 0)
+        _row(f"Vitória {h_name[:12]}: {hw_p:.1f}%  |  Empate: {dr_p:.1f}%  |  Vitória {a_name[:12]}: {aw_p:.1f}%")
+        if et.get("divergence_note"):
+            _row(f"  ⚠️  {et['divergence_note']}")
+        _sep()
+        _row(f"{'FATOR':<16}  {'CASA':>8}  {'EMPATE':>8}  {'FORA':>8}")
+        _sep()
+        for factor, contrib in (et.get("contributions") or {}).items():
+            h_c = contrib.get("home", 0)
+            d_c = contrib.get("draw", 0)
+            a_c = contrib.get("away", 0)
+            _row(f"{factor:<16}  {h_c:>+7.2f}%  {d_c:>+7.2f}%  {a_c:>+7.2f}%")
+        # Lambda breakdown
+        lam_h = et.get("lambda_home")
+        lam_a = et.get("lambda_away")
+        if lam_h:
+            _sep()
+            _row(f"λ {h_name[:12]}: xG={lam_h.get('xG_proprio',0):.3f} → λ_final={lam_h.get('lambda_final',0):.3f}")
+        if lam_a:
+            _row(f"λ {a_name[:12]}: xG={lam_a.get('xG_proprio',0):.3f} → λ_final={lam_a.get('lambda_final',0):.3f}")
+
+    print("╚" + "═" * W + "╝")
+
 
 def _render_pre_game_dashboard(
         h_name, a_name, fixture_id,
@@ -4522,6 +5544,14 @@ def _render_pre_game_dashboard(
         player_impact=None,
         explainability=None,
         data_quality=None,
+        # FASE DE CALIBRAÇÃO PROFISSIONAL
+        model_audit=None,
+        lambda_explainer_data=None,
+        confidence_v2=None,
+        backtest_pro=None,
+        placeholder_detector=None,
+        ev_validation=None,
+        explainability_total=None,
         W=70):
     """Renderiza toda a análise pré-jogo em formato visual profissional."""
 
@@ -5125,6 +6155,22 @@ def _render_pre_game_dashboard(
         print()
         render_entry_recommendations(recommendations, h_name, a_name, W=W)
 
+    # ── FASE DE CALIBRAÇÃO PROFISSIONAL ──────────────────────────────
+    if any(x is not None for x in [
+            model_audit, lambda_explainer_data, confidence_v2,
+            backtest_pro, placeholder_detector, ev_validation, explainability_total]):
+        print()
+        _render_calibration_panels(
+            model_audit=model_audit,
+            lambda_explainer=lambda_explainer_data,
+            confidence_v2=confidence_v2,
+            backtest_pro=backtest_pro,
+            placeholder_detector=placeholder_detector,
+            ev_validation=ev_validation,
+            explainability_total=explainability_total,
+            h_name=h_name, a_name=a_name, W=W,
+        )
+
 
 def execute_advanced_pre_live_analysis_v3():
     """Análise pré-jogo V3 PRO — relatório completo com todos os módulos."""
@@ -5386,6 +6432,78 @@ def execute_advanced_pre_live_analysis_v3():
     print(f"     {a_name[:16]}: xG={_a_wxg:.3f}  xGA_opp={_h_wxga:.3f}  avg_gf={a_blended.get('avg_gf',0):.2f}  λ={_xg_la:.3f}")
     print(f"     Fórmula: λ = 0.55×xG_time + 0.45×xGA_adversário")
 
+    # ── FASE DE CALIBRAÇÃO PROFISSIONAL ──────────────────────────────
+    print("  ▸ CALIB — Model Auditor...")
+    model_audit_v6 = calculate_model_audit(
+        xg_model_probs, mc_probs,
+        {"home_win": elo_probs["home_win"], "draw": elo_probs["draw"], "away_win": elo_probs["away_win"]},
+        ml_probs, api_pred,
+    )
+
+    print("  ▸ CALIB — Lambda Explainer...")
+    lambda_explainer_v6 = calculate_lambda_explainer(
+        h_blended, a_blended,
+        h_wxg, a_wxg, h_wxga, a_wxga,
+        climate_impact=climate_impact_v5,
+        fatigue_h=fatigue_h_v5, fatigue_a=fatigue_a_v5,
+        xg_lh=xg_lh, xg_la=xg_la,
+    )
+
+    print("  ▸ CALIB — Lambdas ajustados por clima + fadiga...")
+    lh_adj, la_adj = apply_climate_fatigue_to_lambdas(
+        lh, la, climate_impact=climate_impact_v5,
+        fatigue_h=fatigue_h_v5, fatigue_a=fatigue_a_v5,
+    )
+    if abs(lh_adj - lh) > 0.01 or abs(la_adj - la) > 0.01:
+        print(f"     λ ajustado: {h_name[:14]} {lh:.3f}→{lh_adj:.3f}  {a_name[:14]} {la:.3f}→{la_adj:.3f}")
+
+    print("  ▸ CALIB — Placeholder Detector...")
+    placeholder_detector_v6 = detect_placeholders(
+        h_blended, a_blended,
+        ppda_h_v5, ppda_a_v5, field_tilt_v5,
+        goals_period_h_v5, goals_period_a_v5,
+        sos_h_v5, sos_a_v5, weather, lineups,
+        ml_probs, detailed_h, detailed_a,
+    )
+
+    print("  ▸ CALIB — Confidence Score 2.0...")
+    confidence_v2_v6 = calculate_confidence_v2(
+        h_sample=len(h_hist), a_sample=len(a_hist),
+        model_audit=model_audit_v6,
+        placeholder_detector=placeholder_detector_v6,
+        data_quality=data_quality_v5,
+        lineups=lineups, weather=weather,
+        detailed_h=detailed_h, detailed_a=detailed_a,
+        h_hist=h_hist, a_hist=a_hist,
+    )
+
+    print("  ▸ CALIB — Backtest Profissional (Brier + LogLoss)...")
+    backtest_pro_v6 = calculate_backtest_professional()
+
+    print("  ▸ CALIB — EV+ Validation...")
+    ev_validation_v6 = validate_high_ev(ev_report, model_audit_v6, ensemble, threshold=0.20)
+
+    print("  ▸ CALIB — ML features V2 + Logistic Regression...")
+    ml_features_v2 = extract_ml_features_v2(
+        h_blended, a_blended, h_elo, a_elo,
+        h_pi, a_pi, h_rest, a_rest, real_odds,
+        ppda_h=ppda_h_v5, ppda_a=ppda_a_v5,
+        h_hist=h_hist, a_hist=a_hist,
+    )
+    ml_probs_v2 = ml_logistic_predict(ml_features_v2)
+    if ml_probs_v2:
+        print(f"     LR: Casa={ml_probs_v2['home_win']*100:.1f}%  Empate={ml_probs_v2['draw']*100:.1f}%  Fora={ml_probs_v2['away_win']*100:.1f}%")
+
+    print("  ▸ CALIB — Explainability Total...")
+    explainability_total_v6 = generate_explainability_total(
+        ensemble, model_audit_v6, lambda_explainer_v6,
+        h_elo, a_elo, h_pi, a_pi,
+        field_tilt_v5, xthreat_v5, climate_impact_v5,
+        fatigue_h_v5, fatigue_a_v5,
+        ppda_h_v5, ppda_a_v5, sos_h_v5, sos_a_v5,
+        h_name=h_name, a_name=a_name,
+    )
+
     # False pressure for home/away (default snap-less — use blended stats proxy)
     _fp_snap_h = {
         "h_dangerous": h_blended.get("avg_dangerous_attacks", 0) if h_blended else 0,
@@ -5464,6 +6582,14 @@ def execute_advanced_pre_live_analysis_v3():
         player_impact=player_impact_v5,
         explainability=explainability_v5,
         data_quality=data_quality_v5,
+        # FASE DE CALIBRAÇÃO PROFISSIONAL
+        model_audit=model_audit_v6,
+        lambda_explainer_data=lambda_explainer_v6,
+        confidence_v2=confidence_v2_v6,
+        backtest_pro=backtest_pro_v6,
+        placeholder_detector=placeholder_detector_v6,
+        ev_validation=ev_validation_v6,
+        explainability_total=explainability_total_v6,
     )
 
     input("\nPressione ENTER para retornar ao menu da partida...")
