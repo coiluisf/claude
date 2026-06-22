@@ -4855,8 +4855,10 @@ def _render_pre_game_dashboard(
         _row(f"{a_name[:22]:<22}  Fadiga: {fat_a_val:>5.1f}/100  {bar_a}")
         if sos_h and sos_a:
             _sep()
-            _row(f"SOS {h_name[:14]}: {sos_h.get('label','?')} (ELO médio oponentes: {sos_h.get('avg_opp_elo',1500):.0f})")
-            _row(f"SOS {a_name[:14]}: {sos_a.get('label','?')} (ELO médio oponentes: {sos_a.get('avg_opp_elo',1500):.0f})")
+            _h_elo_s = f"{sos_h.get('avg_opp_elo'):.0f}" if sos_h.get('avg_opp_elo') is not None else "N/A"
+            _a_elo_s = f"{sos_a.get('avg_opp_elo'):.0f}" if sos_a.get('avg_opp_elo') is not None else "N/A"
+            _row(f"SOS {h_name[:14]}: {sos_h.get('label','?')} (ELO médio oponentes: {_h_elo_s})")
+            _row(f"SOS {a_name[:14]}: {sos_a.get('label','?')} (ELO médio oponentes: {_a_elo_s})")
 
     # ── IMPACTO CLIMÁTICO AVANÇADO V5 ────────────────────────────────
     if climate_impact:
