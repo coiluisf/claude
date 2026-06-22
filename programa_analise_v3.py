@@ -8421,8 +8421,7 @@ def live_trading_dashboard(fixture_id, h_name, a_name, home_id):
                               v5_cashout=_v5_cash, v5_corn_h=_v5_corn_h, v5_corn_a=_v5_corn_a,
                               v5_tactical=_v5_tact, v5_fatigue=_v5_fat, v5_xgm=_v5_xgm,
                               v5_red=_v5_red, v5_game_state=_v5_gs, v5_win_prob=_v5_wp,
-                              v5_trader=_v5_ta, v5_alerts=_v5_alrt,
-                              h_name=h_name, a_name=a_name)
+                              v5_trader=_v5_ta, v5_alerts=_v5_alrt)
 
             # Mantém histórico limitado
             history.append(snap)
