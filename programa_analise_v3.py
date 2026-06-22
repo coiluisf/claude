@@ -674,7 +674,9 @@ def list_world_cup_matches_today():
             print("❌ Entrada inválida.")
 
     except Exception as e:
+        import traceback
         print(f"❌ Erro na requisição do calendário: {e}")
+        traceback.print_exc()
 
 
 def world_cup_match_menu():
@@ -2234,6 +2236,8 @@ def build_ev_report(ensemble: dict, all_odds: dict, h_name: str, a_name: str) ->
     Compares ensemble probabilities vs market odds for all available markets.
     Returns list of dicts: {market, prob_model, prob_market, odd, fair_odd, ev, classification}
     """
+    if not ensemble:
+        return []
     if not all_odds:
         all_odds = {}
     report = []
