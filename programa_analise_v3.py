@@ -3185,6 +3185,1068 @@ def _fetch_all_odds_markets(fixture_id, base_odds):
     return result
 
 
+# =====================================================================
+# MÓDULOS PROFISSIONAIS V4 — EV+, FAIR ODDS, CLV, xTHREAT, KELLY, etc.
+# =====================================================================
+
+import math as _math
+import json as _json
+import os as _os
+import uuid as _uuid
+import datetime as _datetime
+
+# ── MODULE 1 — EV+ ENGINE ────────────────────────────────────────────
+
+EV_LABELS = {
+    "extreme":  {"min": 0.12, "label": "🔥 VALOR EXTREMO",   "stars": "★★★★★"},
+    "strong":   {"min": 0.07, "label": "✅ VALOR FORTE",     "stars": "★★★★☆"},
+    "moderate": {"min": 0.03, "label": "📊 VALOR MODERADO",  "stars": "★★★☆☆"},
+    "weak":     {"min": 0.00, "label": "➕ VALOR FRACO",     "stars": "★★☆☆☆"},
+    "none":     {"min": None, "label": "❌ SEM VALOR",        "stars": "☆☆☆☆☆"},
+}
+
+
+def classify_ev(ev: float) -> dict:
+    """Classifica o EV e retorna label + stars."""
+    for key in ("extreme", "strong", "moderate", "weak"):
+        if ev >= EV_LABELS[key]["min"]:
+            return {"key": key, **EV_LABELS[key]}
+    return {"key": "none", **EV_LABELS["none"]}
+
+
+def calculate_ev_market(prob_model: float, odd: float) -> dict:
+    """EV = (prob_model * odd) - 1. Returns ev, prob_market, classification."""
+    if odd <= 0:
+        return {"ev": None, "prob_market": None, "classification": EV_LABELS["none"]}
+    ev = (prob_model * odd) - 1.0
+    prob_market = 1.0 / odd
+    classification = classify_ev(ev)
+    return {"ev": ev, "prob_market": prob_market, "classification": classification}
+
+
+def calculate_fair_odd(prob_model: float) -> float:
+    """fair_odd = 1 / prob_model"""
+    if prob_model <= 0:
+        return 999.0
+    return 1.0 / prob_model
+
+
+def build_ev_report(ensemble: dict, all_odds: dict, h_name: str, a_name: str) -> list:
+    """
+    Compares ensemble probabilities vs market odds for all available markets.
+    Returns list of dicts: {market, prob_model, prob_market, odd, fair_odd, ev, classification}
+    """
+    if not all_odds:
+        all_odds = {}
+    report = []
+    market_map = [
+        ("home_win",  all_odds.get("home"),   f"Vitória {h_name}"),
+        ("draw",      all_odds.get("draw"),   "Empate"),
+        ("away_win",  all_odds.get("away"),   f"Vitória {a_name}"),
+        ("btts",      all_odds.get("btts"),   "Ambas Marcam (Sim)"),
+        ("over15",    all_odds.get("over15"), "Mais de 1.5 Gols"),
+        ("over25",    all_odds.get("over25"), "Mais de 2.5 Gols"),
+        ("over35",    all_odds.get("over35"), "Mais de 3.5 Gols"),
+        ("under25",   all_odds.get("under25"),"Menos de 2.5 Gols"),
+    ]
+    for market_key, odd, label in market_map:
+        prob_model = ensemble.get(market_key)
+        if prob_model is None or odd is None:
+            continue
+        fair_odd = calculate_fair_odd(prob_model)
+        ev_data  = calculate_ev_market(prob_model, odd)
+        report.append({
+            "market":       market_key,
+            "label":        label,
+            "prob_model":   prob_model,
+            "prob_market":  ev_data["prob_market"],
+            "odd":          odd,
+            "fair_odd":     fair_odd,
+            "ev":           ev_data["ev"],
+            "classification": ev_data["classification"],
+        })
+    return report
+
+
+# ── MODULE 2 — FAIR ODDS ENGINE (pre-game) ───────────────────────────
+
+def render_ev_report(ev_report: list, h_name: str, a_name: str, W: int = 70):
+    """Renders the full EV+ report in a visual box."""
+    if not ev_report:
+        return
+    print("╔" + "═"*W + "╗")
+    print(f"║  📈 RELATÓRIO EV+ — VALOR ESPERADO POR MERCADO".ljust(W+1) + "║")
+    print("╠" + "═"*W + "╣")
+    header = f"  {'MERCADO':<26} {'PROB MOD':>8} {'PROB MKT':>8} {'FAIR ODD':>9} {'ODD MKT':>8} {'EV%':>7}  CLASSIF"
+    print(f"║{header}".ljust(W+1) + "║")
+    print("║" + "─"*W + "║")
+
+    value_markets = [r for r in ev_report if r["ev"] is not None and r["ev"] > 0]
+    no_value      = [r for r in ev_report if r["ev"] is None or r["ev"] <= 0]
+
+    for row in sorted(value_markets, key=lambda x: x["ev"], reverse=True):
+        ev_str = f"{row['ev']*100:>+6.1f}%"
+        pm_str = f"{row['prob_model']*100:.1f}%"
+        pk_str = f"{row['prob_market']*100:.1f}%" if row["prob_market"] else "  N/A "
+        fo_str = f"{row['fair_odd']:.2f}"
+        od_str = f"{row['odd']:.2f}"
+        cl     = row["classification"]
+        line   = f"  {row['label']:<26} {pm_str:>8} {pk_str:>8} {fo_str:>9} {od_str:>8} {ev_str:>7}  {cl['stars']} {cl['label']}"
+        print(f"║{line}".ljust(W+1) + "║")
+
+    if value_markets and no_value:
+        print("║" + "─"*W + "║")
+
+    for row in no_value:
+        ev_str = f"{row['ev']*100:>+6.1f}%" if row["ev"] is not None else "   N/A"
+        pm_str = f"{row['prob_model']*100:.1f}%"
+        pk_str = f"{row['prob_market']*100:.1f}%" if row["prob_market"] else "  N/A "
+        fo_str = f"{row['fair_odd']:.2f}"
+        od_str = f"{row['odd']:.2f}"
+        cl     = row["classification"]
+        line   = f"  {row['label']:<26} {pm_str:>8} {pk_str:>8} {fo_str:>9} {od_str:>8} {ev_str:>7}  {cl['label']}"
+        print(f"║{line}".ljust(W+1) + "║")
+
+    print("╚" + "═"*W + "╝")
+
+
+# ── MODULE 3 — LIVE FAIR ODDS ENGINE ─────────────────────────────────
+
+def calculate_live_fair_odds(snap: dict, hist: list, minute: int,
+                              score_h: int, score_a: int,
+                              h_name: str, a_name: str) -> dict:
+    """Recalculates fair odds in real-time using live stats."""
+    remaining = max(1, 90 - minute)
+    remaining_fraction = remaining / 90.0
+
+    h_sot = snap.get("h_sot", 0)
+    a_sot = snap.get("a_sot", 0)
+    h_dangerous = snap.get("h_dangerous", 0)
+    a_dangerous = snap.get("a_dangerous", 0)
+
+    eff_minute = max(minute, 1)
+    xg_h = h_sot / eff_minute * 90 / 4.5
+    xg_a = a_sot / eff_minute * 90 / 4.5
+
+    # Momentum multiplier from history
+    def _momentum_mult(prefix, snap_, hist_):
+        if not hist_:
+            return 1.0
+        recent_sot = [h.get(f"{prefix}sot", 0) for h in hist_[-4:]]
+        if len(recent_sot) < 2:
+            return 1.0
+        delta = recent_sot[-1] - recent_sot[0]
+        return 1.0 + max(-0.3, min(0.5, delta * 0.05))
+
+    momentum_h = _momentum_mult("h_", snap, hist)
+    momentum_a = _momentum_mult("a_", snap, hist)
+
+    # Phase multiplier: late game = more open
+    if minute >= 75:
+        phase_mult = 1.2
+    elif minute >= 60:
+        phase_mult = 1.1
+    else:
+        phase_mult = 1.0
+
+    live_lambda_h = xg_h * momentum_h * phase_mult
+    live_lambda_a = xg_a * momentum_a * phase_mult
+
+    def _safe_fair_odd_goal(lam, frac):
+        if lam <= 0 or frac <= 0:
+            return 99.0
+        p = 1.0 - _math.exp(-lam * frac)
+        if p <= 0:
+            return 99.0
+        return round(1.0 / p, 2)
+
+    def _poisson_prob(lam, k):
+        if lam <= 0:
+            return 0.0
+        return (_math.exp(-lam) * (lam ** k)) / _math.factorial(k)
+
+    lam_h_rem = live_lambda_h * remaining_fraction
+    lam_a_rem = live_lambda_a * remaining_fraction
+
+    p_btts = (1 - _math.exp(-lam_h_rem)) * (1 - _math.exp(-lam_a_rem)) if lam_h_rem > 0 and lam_a_rem > 0 else 0.0
+    p_over_current_05 = 1.0 - _math.exp(-(lam_h_rem + lam_a_rem)) if (lam_h_rem + lam_a_rem) > 0 else 0.0
+    p_clean_h = _math.exp(-lam_a_rem) if lam_a_rem >= 0 else 1.0
+    p_clean_a = _math.exp(-lam_h_rem) if lam_h_rem >= 0 else 1.0
+
+    return {
+        "next_goal_h":     _safe_fair_odd_goal(live_lambda_h, remaining_fraction),
+        "next_goal_a":     _safe_fair_odd_goal(live_lambda_a, remaining_fraction),
+        "over_current_05": round(1.0 / p_over_current_05, 2) if p_over_current_05 > 0 else 99.0,
+        "btts":            round(1.0 / p_btts, 2) if p_btts > 0 else 99.0,
+        "clean_sheet_h":   round(1.0 / p_clean_h, 2) if p_clean_h > 0 else 99.0,
+        "clean_sheet_a":   round(1.0 / p_clean_a, 2) if p_clean_a > 0 else 99.0,
+        "xg_h_pace":       round(xg_h, 2),
+        "xg_a_pace":       round(xg_a, 2),
+        "live_lambda_h":   round(live_lambda_h, 3),
+        "live_lambda_a":   round(live_lambda_a, 3),
+        "remaining":       remaining,
+    }
+
+
+def render_live_fair_odds(live_fair: dict, snap: dict, h_name: str, a_name: str,
+                           all_live_odds: dict = None, W: int = 70):
+    """Renders live fair odds comparison panel."""
+    if not live_fair:
+        return
+    print("╔" + "═"*W + "╗")
+    print(f"║  ⚡ FAIR ODDS AO VIVO — {h_name} x {a_name}".ljust(W+1) + "║")
+    print("╠" + "═"*W + "╣")
+    print(f"║  {'MERCADO':<30} {'FAIR ODD':>10} {'MKT ODD':>10} {'GAP':>8}".ljust(W+1) + "║")
+    print("║" + "─"*W + "║")
+
+    markets = [
+        (f"Próximo Gol — {h_name}", "next_goal_h"),
+        (f"Próximo Gol — {a_name}", "next_goal_a"),
+        ("Gol (restante da partida)", "over_current_05"),
+        ("Ambas Marcam (restante)", "btts"),
+        (f"Clean Sheet — {h_name}", "clean_sheet_h"),
+        (f"Clean Sheet — {a_name}", "clean_sheet_a"),
+    ]
+    live_odds = all_live_odds or {}
+    for label, key in markets:
+        fair = live_fair.get(key)
+        if fair is None:
+            continue
+        mkt = live_odds.get(key)
+        mkt_str = f"{mkt:.2f}" if mkt else "   N/A"
+        gap_str = ""
+        if mkt:
+            gap = ((mkt / fair) - 1.0) * 100
+            gap_str = f"{gap:>+6.1f}%"
+        print(f"║  {label:<30} {fair:>10.2f} {mkt_str:>10} {gap_str:>8}".ljust(W+1) + "║")
+
+    print("║" + "─"*W + "║")
+    print(f"║  xG cadência: {h_name} {live_fair.get('xg_h_pace',0):.2f}  |  {a_name} {live_fair.get('xg_a_pace',0):.2f}  |  {live_fair.get('remaining',0)}' restantes".ljust(W+1) + "║")
+    print("╚" + "═"*W + "╝")
+
+
+# ── MODULE 4 — CLOSING LINE VALUE (CLV) ──────────────────────────────
+
+CLV_STORE_PATH = "clv_history.json"
+
+
+def load_clv_store() -> list:
+    """Load CLV history from JSON file."""
+    try:
+        if _os.path.exists(CLV_STORE_PATH):
+            with open(CLV_STORE_PATH, "r", encoding="utf-8") as f:
+                return _json.load(f)
+    except Exception:
+        pass
+    return []
+
+
+def save_clv_store(store: list):
+    """Save CLV history to JSON file."""
+    try:
+        with open(CLV_STORE_PATH, "w", encoding="utf-8") as f:
+            _json.dump(store, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
+
+
+def register_bet_entry(fixture_id, market: str, team: str,
+                        odd_entry: float, prob_model: float) -> dict:
+    """Register a bet entry for CLV tracking. Returns bet record."""
+    store = load_clv_store()
+    bet_id = str(_uuid.uuid4())[:8]
+    record = {
+        "bet_id":       bet_id,
+        "fixture_id":   str(fixture_id),
+        "market":       market,
+        "team":         team,
+        "odd_entry":    odd_entry,
+        "prob_model":   prob_model,
+        "odd_closing":  None,
+        "clv":          None,
+        "timestamp":    _datetime.datetime.now().isoformat(),
+    }
+    store.append(record)
+    save_clv_store(store)
+    return record
+
+
+def register_closing_odd(bet_id: str, odd_closing: float) -> dict:
+    """CLV = ((odd_entry / odd_closing) - 1) * 100. Updates and returns record."""
+    store = load_clv_store()
+    for rec in store:
+        if rec.get("bet_id") == bet_id:
+            rec["odd_closing"] = odd_closing
+            if rec.get("odd_entry") and odd_closing > 0:
+                rec["clv"] = ((rec["odd_entry"] / odd_closing) - 1.0) * 100
+            save_clv_store(store)
+            return rec
+    return {}
+
+
+def get_clv_stats() -> dict:
+    """Returns CLV statistics summary."""
+    store = load_clv_store()
+    closed = [r for r in store if r.get("clv") is not None]
+    if not closed:
+        return {
+            "clv_mean": 0.0, "clv_by_market": {}, "clv_by_league": {},
+            "total_bets": 0, "positive_clv_rate": 0.0, "clv_over_3pct_rate": 0.0,
+        }
+    clv_values = [r["clv"] for r in closed]
+    clv_mean   = sum(clv_values) / len(clv_values)
+    positive   = sum(1 for v in clv_values if v > 0)
+    over3      = sum(1 for v in clv_values if v > 3.0)
+
+    by_market = {}
+    for r in closed:
+        mkt = r.get("market", "unknown")
+        by_market.setdefault(mkt, []).append(r["clv"])
+    clv_by_market = {k: sum(v)/len(v) for k, v in by_market.items()}
+
+    return {
+        "clv_mean":           round(clv_mean, 2),
+        "clv_by_market":      clv_by_market,
+        "clv_by_league":      {},
+        "total_bets":         len(closed),
+        "positive_clv_rate":  round(positive / len(closed) * 100, 1),
+        "clv_over_3pct_rate": round(over3 / len(closed) * 100, 1),
+    }
+
+
+def render_clv_report(W: int = 70):
+    """Renders CLV history and statistics panel."""
+    stats  = get_clv_stats()
+    store  = load_clv_store()
+    closed = [r for r in store if r.get("clv") is not None]
+
+    print("╔" + "═"*W + "╗")
+    print(f"║  📉 CLOSING LINE VALUE (CLV) — HISTÓRICO".ljust(W+1) + "║")
+    print("╠" + "═"*W + "╣")
+    print(f"║  Total apostas registradas: {stats['total_bets']}".ljust(W+1) + "║")
+    print(f"║  CLV médio: {stats['clv_mean']:>+.2f}%  |  CLV positivo: {stats['positive_clv_rate']}%  |  CLV>3%: {stats['clv_over_3pct_rate']}%".ljust(W+1) + "║")
+
+    if stats["clv_by_market"]:
+        print("║" + "─"*W + "║")
+        print(f"║  Por mercado:".ljust(W+1) + "║")
+        for mkt, val in stats["clv_by_market"].items():
+            print(f"║    {mkt:<30} {val:>+.2f}%".ljust(W+1) + "║")
+
+    if closed:
+        print("║" + "─"*W + "║")
+        print(f"║  {'ID':>8}  {'MERCADO':<20} {'ENTRADA':>8} {'FECHAMENTO':>11} {'CLV':>8}".ljust(W+1) + "║")
+        for r in closed[-10:]:
+            clv_str = f"{r['clv']:>+.2f}%" if r["clv"] is not None else "  N/A"
+            print(f"║  {r['bet_id']:>8}  {r.get('market','?'):<20} {r.get('odd_entry',0):>8.2f} {r.get('odd_closing',0):>11.2f} {clv_str:>8}".ljust(W+1) + "║")
+
+    print("╚" + "═"*W + "╝")
+
+
+# ── MODULE 5 — xTHREAT ───────────────────────────────────────────────
+
+XTHREAT_WEIGHTS = {
+    "dangerous_attacks": 0.30,
+    "corners":           0.20,
+    "blocked_shots":     0.20,
+    "shots_total":       0.15,
+    "shots_on_target":   0.15,
+}
+
+_XTHREAT_EXPECTED_PER_90 = {
+    "dangerous_attacks": 40.0,
+    "corners":           5.0,
+    "blocked_shots":     4.0,
+    "shots_total":       12.0,
+    "shots_on_target":   4.5,
+}
+
+
+def calculate_xthreat(snap: dict, prefix: str, minute: int) -> dict:
+    """Calculates xThreat index 0-100 for a team."""
+    eff_minute = max(minute, 1)
+    raw = {
+        "dangerous_attacks": snap.get(f"{prefix}dangerous", 0),
+        "corners":           snap.get(f"{prefix}corners",   0),
+        "blocked_shots":     snap.get(f"{prefix}blocked",   0),
+        "shots_total":       snap.get(f"{prefix}shots",     0),
+        "shots_on_target":   snap.get(f"{prefix}sot",       0),
+    }
+    per_minute = {k: v / eff_minute for k, v in raw.items()}
+    per_90     = {k: v * 90          for k, v in per_minute.items()}
+    components = {}
+    for k, w in XTHREAT_WEIGHTS.items():
+        expected = _XTHREAT_EXPECTED_PER_90.get(k, 1.0)
+        ratio    = per_90[k] / expected if expected > 0 else 0.0
+        components[k] = {"value": raw[k], "per90": round(per_90[k], 2), "ratio": round(ratio, 2), "weight": w}
+
+    index_raw = sum(components[k]["ratio"] * XTHREAT_WEIGHTS[k] for k in components)
+    index     = round(min(100.0, index_raw * 100.0), 1)
+
+    if index >= 81:
+        label = "Extrema"
+    elif index >= 61:
+        label = "Alta"
+    elif index >= 41:
+        label = "Moderada"
+    elif index >= 21:
+        label = "Baixa"
+    else:
+        label = "Mínima"
+
+    return {"index": index, "label": label, "components": components, "per_minute_rates": per_minute}
+
+
+# ── MODULE 6 — FALSE PRESSURE DETECTION ──────────────────────────────
+
+def detect_false_pressure(snap: dict, prefix: str, minute: int) -> dict:
+    """Detects sterile pressure: high attacks/possession but low xG/shots-on-target."""
+    eff_minute = max(minute, 1)
+    dangerous  = snap.get(f"{prefix}dangerous", 0)
+    possession = snap.get(f"{prefix}possession", 50)
+    sot        = snap.get(f"{prefix}sot", 0)
+
+    da_per_90  = dangerous / eff_minute * 90
+    sot_per_45 = sot / eff_minute * 45
+    xg_pace    = sot / eff_minute * 90 / 4.5
+
+    is_false = (da_per_90 > 20) and (possession > 55) and (sot_per_45 < 2) and (xg_pace < 0.8)
+
+    confidence = 0.0
+    reasons    = []
+    if da_per_90 > 20:
+        confidence += 0.25
+        reasons.append(f"Ataques perigosos elevados ({da_per_90:.1f}/90)")
+    if possession > 55:
+        confidence += 0.25
+        reasons.append(f"Posse alta ({possession}%)")
+    if sot_per_45 < 2:
+        confidence += 0.25
+        reasons.append(f"Finalizações no alvo baixas ({sot_per_45:.1f}/45)")
+    if xg_pace < 0.8:
+        confidence += 0.25
+        reasons.append(f"xG cadência baixa ({xg_pace:.2f}/90)")
+
+    return {
+        "is_false_pressure": is_false,
+        "confidence":        round(confidence, 2),
+        "reason":            "; ".join(reasons) if is_false else "Pressão eficaz",
+        "details": {
+            "da_per_90":    round(da_per_90, 1),
+            "sot_per_45":   round(sot_per_45, 2),
+            "xg_pace":      round(xg_pace, 2),
+            "possession":   possession,
+        },
+    }
+
+
+# ── MODULE 7 — GAME REGIME DETECTION ─────────────────────────────────
+
+REGIME_LABELS = {
+    "dead_ball":         "⚫ JOGO MORTO",
+    "unilateral":        "🔵 PRESSÃO UNILATERAL",
+    "open_game":         "🟠 JOGO ABERTO / TROCAÇÃO",
+    "post_goal_retrench":"🟡 RETRANCA PÓS-GOL",
+    "late_chaos":        "🔴 FINAL CAÓTICO",
+}
+
+
+def detect_game_regime(snap: dict, hist: list, h_name: str, a_name: str) -> dict:
+    """Classifies the current game state into one of 5 regimes."""
+    minute  = snap.get("minute", 45)
+    score_h = snap.get("score_h", 0)
+    score_a = snap.get("score_a", 0)
+
+    h_upi = (snap.get("h_shots", 0)*2 + snap.get("h_sot", 0)*4 +
+             snap.get("h_blocked", 0)*2 + snap.get("h_corners", 0)*3)
+    a_upi = (snap.get("a_shots", 0)*2 + snap.get("a_sot", 0)*4 +
+             snap.get("a_blocked", 0)*2 + snap.get("a_corners", 0)*3)
+    total_upi = h_upi + a_upi
+
+    score_diff = abs(score_h - score_a)
+    regime_key  = "dead_ball"
+    confidence  = 0.5
+    dominant    = None
+    description = ""
+    advice      = ""
+
+    if minute >= 80 and total_upi > 60:
+        regime_key  = "late_chaos"
+        confidence  = 0.85
+        description = "Minutos finais com pressão intensa — gols e cartões mais prováveis"
+        advice      = "Mercados de próximo gol e cartões com valor"
+    elif score_diff >= 2:
+        regime_key  = "post_goal_retrench"
+        confidence  = 0.80
+        description = "Time perdedor pressionando, vencedor retraído"
+        advice      = "Atenção ao gol de consolação do time perdedor"
+        dominant    = h_name if score_h > score_a else a_name
+    elif total_upi > 0 and (max(h_upi, a_upi) / total_upi > 0.70):
+        regime_key  = "unilateral"
+        confidence  = 0.75
+        dominant    = h_name if h_upi > a_upi else a_name
+        description = f"{dominant} dominando com pressão unilateral"
+        advice      = f"Apostar no próximo gol de {dominant}"
+    elif total_upi > 80:
+        regime_key  = "open_game"
+        confidence  = 0.70
+        description = "Jogo aberto com pressão de ambos os lados — ambiente de gols"
+        advice      = "Over e BTTS com valor"
+    elif total_upi < 25:
+        regime_key  = "dead_ball"
+        confidence  = 0.65
+        description = "Jogo morto — poucos eventos, mercados em espera"
+        advice      = "Evitar entradas — aguardar dinamismo"
+
+    return {
+        "regime_key":    regime_key,
+        "label":         REGIME_LABELS.get(regime_key, regime_key),
+        "confidence":    confidence,
+        "dominant_team": dominant,
+        "description":   description,
+        "trading_advice": advice,
+        "h_upi":         h_upi,
+        "a_upi":         a_upi,
+    }
+
+
+# ── MODULE 8 — CONFIDENCE SCORE (enhanced) ───────────────────────────
+
+def calculate_enhanced_confidence(
+    h_sample: int, a_sample: int,
+    poisson_probs: dict, mc_probs: dict, elo_probs: dict, xg_probs: dict,
+    real_odds: dict,
+    h_injury_count: int = 0, a_injury_count: int = 0,
+    h_form_variance: float = 0.0, a_form_variance: float = 0.0,
+) -> dict:
+    """8 components → weighted score 0-100."""
+    components = {}
+
+    # 1. Sample size (0-20)
+    min_sample = min(h_sample, a_sample)
+    c1 = min(20.0, (min_sample / 10.0) * 20.0)
+    components["sample_size"] = round(c1, 1)
+
+    # 2. Model convergence (0-20)
+    if poisson_probs and mc_probs and elo_probs:
+        diffs = []
+        for key in ("home_win", "draw", "away_win"):
+            vals = [p.get(key, 0.33) for p in [poisson_probs, mc_probs, elo_probs] if p]
+            diffs.append(max(vals) - min(vals))
+        avg_spread = sum(diffs) / len(diffs) if diffs else 0.3
+        c2 = max(0.0, 20.0 - avg_spread * 100.0)
+    else:
+        c2 = 10.0
+    components["model_convergence"] = round(c2, 1)
+
+    # 3. Odds availability (0-10)
+    c3 = 10.0 if real_odds and len(real_odds) >= 3 else (5.0 if real_odds else 0.0)
+    components["odds_availability"] = c3
+
+    # 4. Injury impact (0-15, penalizes)
+    total_injuries = h_injury_count + a_injury_count
+    c4 = max(0.0, 15.0 - total_injuries * 2.5)
+    components["injury_impact"] = round(c4, 1)
+
+    # 5. Form consistency (0-15)
+    avg_var = (h_form_variance + a_form_variance) / 2.0
+    c5 = max(0.0, 15.0 - avg_var * 50.0)
+    components["form_consistency"] = round(c5, 1)
+
+    # 6. xG data quality (0-10)
+    c6 = 10.0 if xg_probs and xg_probs.get("home_win", 0) > 0 else 5.0
+    components["xg_quality"] = c6
+
+    # 7. ELO reliability (0-5)
+    c7 = 5.0 if min_sample >= 5 else round(min_sample / 5.0 * 5.0, 1)
+    components["elo_reliability"] = c7
+
+    # 8. H2H bonus (0-5) — small bonus for having data
+    c8 = 5.0 if real_odds else 2.5
+    components["h2h_bonus"] = c8
+
+    total = sum(components.values())
+    score = round(min(100.0, total), 1)
+
+    if score >= 85:
+        label = "Muito Alta"
+        recommendation = "Modelo altamente confiável — considerar entrada"
+    elif score >= 70:
+        label = "Alta"
+        recommendation = "Boa confiança — entrar com Kelly/4 ou Kelly/2"
+    elif score >= 50:
+        label = "Média"
+        recommendation = "Confiança moderada — usar Kelly/8 e tamanho reduzido"
+    else:
+        label = "Baixa"
+        recommendation = "Confiança baixa — evitar ou apostar valor mínimo"
+
+    return {
+        "score":              score,
+        "label":              label,
+        "components_detail":  components,
+        "recommendation":     recommendation,
+    }
+
+
+# ── MODULE 9 — BANKROLL MANAGEMENT (Kelly) ───────────────────────────
+
+KELLY_VARIANTS = {
+    "full":    1.00,
+    "half":    0.50,
+    "quarter": 0.25,
+    "eighth":  0.125,
+}
+
+
+def calculate_kelly(prob_model: float, odd: float) -> dict:
+    """kelly_full = ((odd * prob_model) - 1) / (odd - 1). Capped at 25%."""
+    if odd <= 1.0 or prob_model <= 0:
+        return {k: 0.0 for k in ("full", "half", "quarter", "eighth",
+                                  "expected_growth", "risk_of_ruin_estimate")}
+    kelly_full = ((odd * prob_model) - 1.0) / (odd - 1.0)
+    kelly_full = max(0.0, min(0.25, kelly_full))
+
+    result = {}
+    for name, mult in KELLY_VARIANTS.items():
+        result[name] = round(kelly_full * mult, 4)
+
+    # Expected log growth approximation
+    f = kelly_full
+    if f > 0:
+        ev = prob_model * odd - 1
+        exp_growth = round(prob_model * _math.log(1 + f * (odd - 1)) +
+                           (1 - prob_model) * _math.log(1 - f), 4)
+    else:
+        exp_growth = 0.0
+
+    # Rough risk of ruin (simplified)
+    if kelly_full > 0:
+        p = prob_model
+        q = 1 - p
+        ror = round((q / p) ** (1.0 / kelly_full), 4) if p > q else 0.5
+        ror = min(1.0, max(0.0, ror))
+    else:
+        ror = 1.0
+
+    result["expected_growth"]       = exp_growth
+    result["risk_of_ruin_estimate"] = ror
+    return result
+
+
+def recommend_stake(ev: float, confidence: float, kelly_full: float,
+                    bankroll: float = None) -> dict:
+    """Combines Kelly + confidence to produce final stake recommendation."""
+    if confidence >= 85:
+        stake_pct = kelly_full * KELLY_VARIANTS["half"]
+    elif confidence >= 70:
+        stake_pct = kelly_full * KELLY_VARIANTS["quarter"]
+    else:
+        stake_pct = kelly_full * KELLY_VARIANTS["eighth"]
+
+    stake_pct = min(0.05, stake_pct)  # never exceed 5%
+
+    reasoning = (
+        f"Confidence {confidence:.0f}% → Kelly/{2 if confidence>=85 else (4 if confidence>=70 else 8)}; "
+        f"Stake cap 5%"
+    )
+    result = {"stake_pct": round(stake_pct, 4), "reasoning": reasoning}
+    if bankroll and bankroll > 0:
+        result["stake_amount"] = round(bankroll * stake_pct, 2)
+    return result
+
+
+def render_kelly_panel(prob_model: float, odd: float, ev: float,
+                        confidence: float, bankroll: float = None, W: int = 70):
+    """Renders the Kelly/stake recommendation panel."""
+    kelly = calculate_kelly(prob_model, odd)
+    stake = recommend_stake(ev, confidence, kelly["full"], bankroll)
+
+    print("╔" + "═"*W + "╗")
+    print(f"║  💰 GESTÃO DE BANCA — KELLY CRITERION".ljust(W+1) + "║")
+    print("╠" + "═"*W + "╣")
+    print(f"║  Prob. modelo: {prob_model*100:.1f}%  |  Odd: {odd:.2f}  |  EV: {ev*100:>+.1f}%  |  Confiança: {confidence:.0f}%".ljust(W+1) + "║")
+    print("║" + "─"*W + "║")
+    for name in ("full", "half", "quarter", "eighth"):
+        pct = kelly[name] * 100
+        label = {"full": "Kelly Completo", "half": "Meio Kelly",
+                 "quarter": "Quarto Kelly", "eighth": "Oitavo Kelly"}[name]
+        mark = " ◀ RECOMENDADO" if abs(kelly[name] - stake["stake_pct"]) < 0.001 else ""
+        print(f"║  {label:<20} {pct:>6.2f}%{mark}".ljust(W+1) + "║")
+    print("║" + "─"*W + "║")
+    print(f"║  Stake recomendado: {stake['stake_pct']*100:.2f}%".ljust(W+1) + "║")
+    if bankroll and "stake_amount" in stake:
+        print(f"║  Valor (banca R${bankroll:.2f}): R${stake['stake_amount']:.2f}".ljust(W+1) + "║")
+    print(f"║  {stake['reasoning']}".ljust(W+1) + "║")
+    print(f"║  Crescimento esperado (log): {kelly['expected_growth']:>+.4f}".ljust(W+1) + "║")
+    print("╚" + "═"*W + "╝")
+
+
+# ── MODULE 10 — ENTRY RECOMMENDER ────────────────────────────────────
+
+ENTRY_RULES = {
+    "min_ev":           0.03,
+    "min_confidence":   70,
+    "min_fair_odd_gap": 0.05,
+    "no_false_pressure": True,
+}
+
+
+def recommend_entry(
+    ev_report: list,
+    confidence: dict,
+    false_pressure_h: dict,
+    false_pressure_a: dict,
+    game_regime: dict = None,
+    live_mode: bool = False,
+) -> list:
+    """Filters ev_report to only entries that pass ALL rules."""
+    recommendations = []
+    conf_score = confidence.get("score", 0) if confidence else 0
+
+    for row in (ev_report or []):
+        ev = row.get("ev")
+        if ev is None or ev < ENTRY_RULES["min_ev"]:
+            continue
+        if conf_score < ENTRY_RULES["min_confidence"]:
+            continue
+
+        fair_odd   = row.get("fair_odd", 0)
+        market_odd = row.get("odd", 0)
+        if fair_odd and market_odd and (market_odd > fair_odd * (1 + ENTRY_RULES["min_fair_odd_gap"])):
+            continue  # market odd too far above fair odd (bad value direction)
+
+        # Skip if relevant team has false pressure
+        if ENTRY_RULES["no_false_pressure"]:
+            market_key = row.get("market", "")
+            if "home" in market_key and false_pressure_h and false_pressure_h.get("is_false_pressure"):
+                continue
+            if "away" in market_key and false_pressure_a and false_pressure_a.get("is_false_pressure"):
+                continue
+
+        kelly = calculate_kelly(row["prob_model"], market_odd)
+        stake = recommend_stake(ev, conf_score, kelly["full"])
+
+        recommendations.append({
+            "market":      row.get("market"),
+            "label":       row.get("label", row.get("market")),
+            "odd":         market_odd,
+            "fair_odd":    fair_odd,
+            "ev":          ev,
+            "ev_class":    row.get("classification", {}),
+            "confidence":  conf_score,
+            "stake_pct":   stake["stake_pct"],
+            "entry_type":  "BACK",
+        })
+
+    return sorted(recommendations, key=lambda x: x["ev"], reverse=True)
+
+
+def render_entry_recommendations(recommendations: list, h_name: str, a_name: str, W: int = 70):
+    """Renders entry recommendations panel."""
+    print("╔" + "═"*W + "╗")
+    if recommendations:
+        print(f"║  🎯 ENTRADAS RECOMENDADAS".ljust(W+1) + "║")
+        print("╠" + "═"*W + "╣")
+        for rec in recommendations:
+            cl   = rec.get("ev_class", {})
+            stars = cl.get("stars", "")
+            print(f"║  {stars} {rec['entry_type']} — {rec['label']}".ljust(W+1) + "║")
+            print(f"║    Odd: {rec['odd']:.2f}  |  Fair Odd: {rec['fair_odd']:.2f}  |  EV: {rec['ev']*100:>+.1f}%  |  Stake: {rec['stake_pct']*100:.2f}%".ljust(W+1) + "║")
+            print("║" + "─"*W + "║")
+    else:
+        print(f"║  ⛔ NENHUMA ENTRADA — Critérios EV+ não atingidos".ljust(W+1) + "║")
+        print("╠" + "═"*W + "╣")
+        print(f"║  Requisitos: EV ≥ {ENTRY_RULES['min_ev']*100:.0f}%  |  Confiança ≥ {ENTRY_RULES['min_confidence']}  |  Gap fair≥mkt+{ENTRY_RULES['min_fair_odd_gap']*100:.0f}%".ljust(W+1) + "║")
+    print("╚" + "═"*W + "╝")
+
+
+# ── MODULE 11 — ML CALIBRATION PIPELINE ──────────────────────────────
+
+ML_FEATURE_NAMES = [
+    "elo_diff", "xg_h", "xg_a", "h_form_pts", "a_form_pts",
+    "h_pressure", "a_pressure", "h_avg_gf", "a_avg_gf",
+    "h_avg_gc", "a_avg_gc", "h_sot_rate", "a_sot_rate",
+    "odds_home", "odds_draw", "odds_away",
+    "ref_score", "h_rest_days", "a_rest_days",
+    "h_injury_count", "a_injury_count", "h_corners", "a_corners",
+]
+
+
+def extract_calibration_features(
+    h_blended: dict, a_blended: dict,
+    h_elo: dict, a_elo: dict,
+    h_pi: dict, a_pi: dict,
+    h_form: list, a_form: list,
+    real_odds: dict,
+    ref_stats: dict,
+    h_rest: int, a_rest: int,
+    h_injuries: list, a_injuries: list,
+    xg_lh: float, xg_la: float,
+) -> dict:
+    """Extracts all ML features for calibration."""
+    elo_h = h_elo.get("elo", 1500) if h_elo else 1500
+    elo_a = a_elo.get("elo", 1500) if a_elo else 1500
+
+    def _form_pts(form_list):
+        pts = 0
+        for g in (form_list or [])[-5:]:
+            r = g.get("result", "")
+            if r == "V":   pts += 3
+            elif r == "E": pts += 1
+        return pts
+
+    def _form_variance(form_list):
+        pts = [3 if g.get("result") == "V" else (1 if g.get("result") == "E" else 0)
+               for g in (form_list or [])[-5:]]
+        if len(pts) < 2:
+            return 0.0
+        mean = sum(pts) / len(pts)
+        return sum((p - mean)**2 for p in pts) / len(pts)
+
+    odds_home = real_odds.get("home", 0) if real_odds else 0
+    odds_draw = real_odds.get("draw", 0) if real_odds else 0
+    odds_away = real_odds.get("away", 0) if real_odds else 0
+    ref_score = ref_stats.get("cards_per_game", 0) if ref_stats else 0
+
+    feature_dict = {
+        "elo_diff":       elo_h - elo_a,
+        "xg_h":           xg_lh or 0.0,
+        "xg_a":           xg_la or 0.0,
+        "h_form_pts":     _form_pts(h_form),
+        "a_form_pts":     _form_pts(a_form),
+        "h_pressure":     h_pi.get("index", 50) if h_pi else 50,
+        "a_pressure":     a_pi.get("index", 50) if a_pi else 50,
+        "h_avg_gf":       h_blended.get("avg_gf", 1.2) if h_blended else 1.2,
+        "a_avg_gf":       a_blended.get("avg_gf", 0.9) if a_blended else 0.9,
+        "h_avg_gc":       h_blended.get("avg_gc", 1.1) if h_blended else 1.1,
+        "a_avg_gc":       a_blended.get("avg_gc", 1.2) if a_blended else 1.2,
+        "h_sot_rate":     h_blended.get("avg_sot", 4.5) if h_blended else 4.5,
+        "a_sot_rate":     a_blended.get("avg_sot", 4.5) if a_blended else 4.5,
+        "odds_home":      odds_home,
+        "odds_draw":      odds_draw,
+        "odds_away":      odds_away,
+        "ref_score":      ref_score,
+        "h_rest_days":    h_rest or 7,
+        "a_rest_days":    a_rest or 7,
+        "h_injury_count": len(h_injuries) if h_injuries else 0,
+        "a_injury_count": len(a_injuries) if a_injuries else 0,
+        "h_corners":      h_blended.get("avg_corners", 5.0) if h_blended else 5.0,
+        "a_corners":      a_blended.get("avg_corners", 5.0) if a_blended else 5.0,
+        "h_form_var":     _form_variance(h_form),
+        "a_form_var":     _form_variance(a_form),
+    }
+    vector = [feature_dict.get(k, 0.0) for k in ML_FEATURE_NAMES]
+    return {"features": feature_dict, "vector": vector}
+
+
+def calibrate_probabilities(features: dict, base_probs: dict) -> dict:
+    """Attempts to load trained models, falls back to Platt scaling."""
+    calibrated = dict(base_probs)
+    model_used  = "base_ensemble"
+
+    try:
+        import joblib as _joblib
+        model = _joblib.load("calibration_model.pkl")
+        vector = features.get("vector", [])
+        if vector and hasattr(model, "predict_proba"):
+            pred = model.predict_proba([vector])[0]
+            if len(pred) >= 3:
+                calibrated["home_win"] = round(pred[0], 4)
+                calibrated["draw"]     = round(pred[1], 4)
+                calibrated["away_win"] = round(pred[2], 4)
+                model_used = "xgb_calibrated"
+    except Exception:
+        # Platt scaling fallback: sigmoid squeeze toward 0.5
+        def _platt(p, a=0.85, b=0.075):
+            return 1.0 / (1.0 + _math.exp(-a * _math.log(p / (1 - p + 1e-9)) + b))
+        for key in ("home_win", "draw", "away_win"):
+            if key in calibrated and 0 < calibrated[key] < 1:
+                calibrated[key] = round(_platt(calibrated[key]), 4)
+        model_used = "platt_fallback"
+
+    # Renormalize 1X2
+    s = calibrated.get("home_win", 0) + calibrated.get("draw", 0) + calibrated.get("away_win", 0)
+    if s > 0:
+        for k in ("home_win", "draw", "away_win"):
+            if k in calibrated:
+                calibrated[k] = round(calibrated[k] / s, 4)
+
+    return {"calibrated": calibrated, "model_used": model_used}
+
+
+def render_ml_calibration_panel(features: dict, base_probs: dict, calibrated: dict, W: int = 70):
+    """Renders ML calibration panel."""
+    print("╔" + "═"*W + "╗")
+    print(f"║  🤖 ML CALIBRAÇÃO — {calibrated.get('model_used','?').upper()}".ljust(W+1) + "║")
+    print("╠" + "═"*W + "╣")
+    print(f"║  {'RESULTADO':<20} {'BASE':>8} {'CALIBRADO':>10} {'DELTA':>8}".ljust(W+1) + "║")
+    print("║" + "─"*W + "║")
+    cal = calibrated.get("calibrated", {})
+    for key, label in [("home_win","Vitória Casa"), ("draw","Empate"), ("away_win","Vitória Fora")]:
+        bp = base_probs.get(key, 0)
+        cp = cal.get(key, bp)
+        delta = cp - bp
+        print(f"║  {label:<20} {bp*100:>7.1f}% {cp*100:>9.1f}% {delta*100:>+7.1f}%".ljust(W+1) + "║")
+    fdict = features.get("features", {})
+    if fdict:
+        print("║" + "─"*W + "║")
+        print(f"║  Features relevantes:".ljust(W+1) + "║")
+        for k in ("elo_diff", "xg_h", "xg_a", "h_form_pts", "a_form_pts"):
+            if k in fdict:
+                print(f"║    {k:<25} {fdict[k]:>10.2f}".ljust(W+1) + "║")
+    print("╚" + "═"*W + "╝")
+
+
+# ── MODULE 12 — PROFESSIONAL BACKTEST ────────────────────────────────
+
+BACKTEST_STORE_PATH = "backtest_results.json"
+
+
+def load_backtest_store() -> list:
+    """Load historical bet results."""
+    try:
+        if _os.path.exists(BACKTEST_STORE_PATH):
+            with open(BACKTEST_STORE_PATH, "r", encoding="utf-8") as f:
+                return _json.load(f)
+    except Exception:
+        pass
+    return []
+
+
+def save_backtest_store(store: list):
+    """Save bet results."""
+    try:
+        with open(BACKTEST_STORE_PATH, "w", encoding="utf-8") as f:
+            _json.dump(store, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
+
+
+def record_bet_result(bet_id: str, result: str, profit_loss: float, stake: float):
+    """Record actual result: 'win'/'lose'/'void'."""
+    store = load_backtest_store()
+    for rec in store:
+        if rec.get("bet_id") == bet_id:
+            rec["result"]       = result
+            rec["profit_loss"]  = profit_loss
+            rec["stake"]        = stake
+            rec["closed_at"]    = _datetime.datetime.now().isoformat()
+            save_backtest_store(store)
+            return rec
+    # New record
+    new_rec = {
+        "bet_id":      bet_id,
+        "result":      result,
+        "profit_loss": profit_loss,
+        "stake":       stake,
+        "closed_at":   _datetime.datetime.now().isoformat(),
+    }
+    store.append(new_rec)
+    save_backtest_store(store)
+    return new_rec
+
+
+def calculate_backtest_metrics(store: list) -> dict:
+    """Calculates full backtest metrics."""
+    settled = [r for r in store if r.get("result") in ("win", "lose")]
+    if not settled:
+        return {
+            "roi": 0.0, "yield": 0.0, "hit_rate": 0.0,
+            "clv_mean": 0.0, "brier_score": None,
+            "sharpe_ratio": 0.0, "max_drawdown": 0.0,
+            "total_bets": 0, "total_staked": 0.0, "total_profit": 0.0,
+        }
+    wins    = sum(1 for r in settled if r["result"] == "win")
+    losses  = sum(1 for r in settled if r["result"] == "lose")
+    staked  = sum(r.get("stake", 0) for r in settled)
+    profit  = sum(r.get("profit_loss", 0) for r in settled)
+
+    roi        = profit / staked if staked > 0 else 0.0
+    yld        = roi  # same for flat stakes
+    hit_rate   = wins / len(settled) if settled else 0.0
+
+    # Daily PnL for Sharpe
+    daily: dict = {}
+    for r in settled:
+        day = r.get("closed_at", "")[:10] or "unknown"
+        daily.setdefault(day, 0.0)
+        daily[day] += r.get("profit_loss", 0)
+    daily_vals = list(daily.values())
+    if len(daily_vals) >= 2:
+        mean_d = sum(daily_vals) / len(daily_vals)
+        std_d  = (_math.sqrt(sum((v - mean_d)**2 for v in daily_vals) / len(daily_vals))
+                  if len(daily_vals) > 1 else 1.0)
+        sharpe = mean_d / std_d if std_d > 0 else 0.0
+    else:
+        sharpe = 0.0
+
+    # Equity curve & max drawdown
+    equity = 0.0
+    peak   = 0.0
+    max_dd = 0.0
+    for r in settled:
+        equity += r.get("profit_loss", 0)
+        if equity > peak:
+            peak = equity
+        dd = peak - equity
+        if dd > max_dd:
+            max_dd = dd
+
+    clv_stats = get_clv_stats()
+
+    return {
+        "roi":           round(roi * 100, 2),
+        "yield":         round(yld * 100, 2),
+        "hit_rate":      round(hit_rate * 100, 1),
+        "clv_mean":      clv_stats.get("clv_mean", 0.0),
+        "brier_score":   None,
+        "sharpe_ratio":  round(sharpe, 3),
+        "max_drawdown":  round(max_dd, 2),
+        "total_bets":    len(settled),
+        "total_staked":  round(staked, 2),
+        "total_profit":  round(profit, 2),
+    }
+
+
+def render_backtest_report(W: int = 70):
+    """Renders full backtest report with all metrics and ASCII equity curve."""
+    store   = load_backtest_store()
+    metrics = calculate_backtest_metrics(store)
+
+    print("╔" + "═"*W + "╗")
+    print(f"║  📊 BACKTEST PROFISSIONAL — HISTÓRICO DE PERFORMANCE".ljust(W+1) + "║")
+    print("╠" + "═"*W + "╣")
+    print(f"║  Total apostas: {metrics['total_bets']}  |  Staked: R${metrics['total_staked']:.2f}  |  Lucro: R${metrics['total_profit']:.2f}".ljust(W+1) + "║")
+    print(f"║  ROI: {metrics['roi']:>+.2f}%  |  Hit Rate: {metrics['hit_rate']:.1f}%  |  Sharpe: {metrics['sharpe_ratio']:.3f}".ljust(W+1) + "║")
+    print(f"║  CLV médio: {metrics['clv_mean']:>+.2f}%  |  Max Drawdown: R${metrics['max_drawdown']:.2f}".ljust(W+1) + "║")
+
+    # ASCII equity curve
+    settled = [r for r in store if r.get("result") in ("win", "lose")]
+    if len(settled) >= 2:
+        equity_curve = []
+        eq = 0.0
+        for r in settled:
+            eq += r.get("profit_loss", 0)
+            equity_curve.append(eq)
+        min_eq = min(equity_curve)
+        max_eq = max(equity_curve)
+        rng    = max_eq - min_eq or 1.0
+        height = 5
+        print("║" + "─"*W + "║")
+        print(f"║  Curva de equity (ASCII):".ljust(W+1) + "║")
+        for row_i in range(height, -1, -1):
+            threshold = min_eq + (row_i / height) * rng
+            line = ""
+            for val in equity_curve[-min(W-4, len(equity_curve)):]:
+                line += "█" if val >= threshold else " "
+            print(f"║  {line}".ljust(W+1) + "║")
+
+    print("╚" + "═"*W + "╝")
+
+
+
+
+
 def _render_pre_game_dashboard(
         h_name, a_name, fixture_id,
         h_id, a_id,
@@ -3207,6 +4269,8 @@ def _render_pre_game_dashboard(
         all_odds=None,
         match_datetime=None,
         league_name=None,
+        ev_report=None,
+        recommendations=None,
         W=70):
     """Renderiza toda a análise pré-jogo em formato visual profissional."""
 
@@ -3503,6 +4567,16 @@ def _render_pre_game_dashboard(
 
     print("╚" + "═"*W + "╝")
 
+    # ── EV+ REPORT ──────────────────────────────────────────────────
+    if ev_report:
+        print()
+        render_ev_report(ev_report, h_name, a_name, W=W)
+
+    # ── ENTRY RECOMMENDATIONS ────────────────────────────────────────
+    if recommendations is not None:
+        print()
+        render_entry_recommendations(recommendations, h_name, a_name, W=W)
+
 
 def execute_advanced_pre_live_analysis_v3():
     """Análise pré-jogo V3 PRO — relatório completo com todos os módulos."""
@@ -3638,14 +4712,16 @@ def execute_advanced_pre_live_analysis_v3():
     ml_probs = ml_model_predict(extract_ml_features(
         h_blended, a_blended, h_elo, a_elo, h_pi, a_pi, h_rest, a_rest, real_odds, ref_stats))
 
-    # M11 — Confidence Score
-    data_quality = min(100,
-        (min(len(h_hist), len(a_hist)) / 10.0) * 100 * 0.5
-        + (50 if real_odds else 0) * 0.3 + 50 * 0.2)
-    conf = calculate_confidence_score(
-        len(h_hist), len(a_hist),
-        {"home_win": _hw, "draw": _dr, "away_win": _aw},
-        mc_probs, real_odds, odds_movement_result, data_quality)
+    # M11 — Enhanced Confidence Score (V4)
+    conf = calculate_enhanced_confidence(
+        h_sample=len(h_hist), a_sample=len(a_hist),
+        poisson_probs={"home_win": _hw, "draw": _dr, "away_win": _aw},
+        mc_probs=mc_probs,
+        elo_probs={"home_win": elo_probs["home_win"], "draw": elo_probs["draw"],
+                   "away_win": elo_probs["away_win"]},
+        xg_probs=xg_model_probs,
+        real_odds=real_odds,
+    )
 
     # M12 — Ensemble
     ensemble = calculate_ensemble_probability(
@@ -3657,7 +4733,7 @@ def execute_advanced_pre_live_analysis_v3():
                    "away_win": elo_probs["away_win"]},
     )
 
-    # EV Final
+    # EV Final (legacy)
     ev_final = {}
     if real_odds and ensemble:
         for side, odd_key in [("home_win","home"), ("draw","draw"), ("away_win","away")]:
@@ -3665,7 +4741,41 @@ def execute_advanced_pre_live_analysis_v3():
             if odd:
                 ev_final[odd_key] = (ensemble.get(side, 0) * odd) - 1.0
 
-    print("  ✅ Dados coletados — renderizando relatório...\n")
+    # EV+ Report (V4)
+    ev_report = build_ev_report(ensemble, all_odds, h_name, a_name)
+
+    # False pressure for home/away (default snap-less — use blended stats proxy)
+    _fp_snap_h = {
+        "h_dangerous": h_blended.get("avg_dangerous_attacks", 0) if h_blended else 0,
+        "h_possession": 52, "h_sot": h_blended.get("avg_sot", 0) if h_blended else 0,
+    }
+    _fp_snap_a = {
+        "a_dangerous": a_blended.get("avg_dangerous_attacks", 0) if a_blended else 0,
+        "a_possession": 48, "a_sot": a_blended.get("avg_sot", 0) if a_blended else 0,
+    }
+    false_pressure_h = detect_false_pressure(_fp_snap_h, "h_", 90)
+    false_pressure_a = detect_false_pressure(_fp_snap_a, "a_", 90)
+
+    # Entry recommendations (V4)
+    recommendations = recommend_entry(
+        ev_report=ev_report,
+        confidence=conf,
+        false_pressure_h=false_pressure_h,
+        false_pressure_a=false_pressure_a,
+    )
+
+    # Kelly for best EV market
+    if recommendations:
+        best = recommendations[0]
+        print("  ✅ Dados coletados — renderizando relatório...\n")
+        render_kelly_panel(
+            prob_model=best["ev"] + (1.0 / best["odd"] if best["odd"] else 0),
+            odd=best["odd"],
+            ev=best["ev"],
+            confidence=conf.get("score", 0),
+        )
+    else:
+        print("  ✅ Dados coletados — renderizando relatório...\n")
 
     _render_pre_game_dashboard(
         h_name=h_name, a_name=a_name, fixture_id=fixture_id,
@@ -3689,6 +4799,8 @@ def execute_advanced_pre_live_analysis_v3():
         all_odds=all_odds,
         match_datetime=match_datetime,
         league_name=league_name,
+        ev_report=ev_report,
+        recommendations=recommendations,
     )
 
     input("\nPressione ENTER para retornar ao menu da partida...")
@@ -4123,7 +5235,9 @@ def _render_bar(value, max_val, width=20, char="█"):
 
 def _render_dashboard(snap, hist, h_name, a_name, home_id,
                        goal_sigs, corner_sigs, card_sigs,
-                       poll_count, next_poll_in, consciousness=None):
+                       poll_count, next_poll_in, consciousness=None,
+                       live_fair=None, regime=None,
+                       false_pressure_h=None, false_pressure_a=None):
     """Renderiza o painel de trading ao vivo — layout limpo e actionable."""
     _clear()
 
@@ -4247,6 +5361,37 @@ def _render_dashboard(snap, hist, h_name, a_name, home_id,
         if snap.get("_h_sot_estimated"):
             print(f"║  ⚠ SOT estimado (33% shots)".ljust(W+1) + "║")
 
+    # ── LIVE FAIR ODDS ────────────────────────────────────────────────
+    if live_fair:
+        print("╠" + "═"*W + "╣")
+        print(f"║  ⚡ FAIR ODDS AO VIVO".ljust(W+1) + "║")
+        print("║" + "─"*W + "║")
+        for _lf_label, _lf_key in [
+            (f"Próx. Gol {h_name[:14]}", "next_goal_h"),
+            (f"Próx. Gol {a_name[:14]}", "next_goal_a"),
+            ("Gol restante",             "over_current_05"),
+            ("Ambas Marcam",             "btts"),
+        ]:
+            _lf_val = live_fair.get(_lf_key)
+            if _lf_val is not None:
+                print(f"║  {_lf_label:<30} {_lf_val:>8.2f}".ljust(W+1) + "║")
+
+    # ── GAME REGIME ───────────────────────────────────────────────────
+    if regime:
+        print("╠" + "═"*W + "╣")
+        print(f"║  {regime.get('label','?')}  (conf: {regime.get('confidence',0)*100:.0f}%)".ljust(W+1) + "║")
+        if regime.get("trading_advice"):
+            print(f"║    💡 {regime['trading_advice'][:W-6]}".ljust(W+1) + "║")
+
+    # ── FALSE PRESSURE ────────────────────────────────────────────────
+    if false_pressure_h and false_pressure_h.get("is_false_pressure"):
+        print("╠" + "═"*W + "╣")
+        print(f"║  ⚠ PRESSÃO FALSA — {h_name[:20]}  ({false_pressure_h['reason'][:W-28]})".ljust(W+1) + "║")
+    if false_pressure_a and false_pressure_a.get("is_false_pressure"):
+        if not (false_pressure_h and false_pressure_h.get("is_false_pressure")):
+            print("╠" + "═"*W + "╣")
+        print(f"║  ⚠ PRESSÃO FALSA — {a_name[:20]}  ({false_pressure_a['reason'][:W-28]})".ljust(W+1) + "║")
+
     print("╠" + "═"*W + "╣")
     print(f"║  [Q] Sair   Intervalo: {POLL_INTERVAL}s   [DIAG={DIAG_MODE}]".ljust(W+1) + "║")
     print("╚" + "═"*W + "╝")
@@ -4309,10 +5454,31 @@ def live_trading_dashboard(fixture_id, h_name, a_name, home_id):
                         "score":    99,
                     })
 
+            # V4 — Live analytics
+            _minute   = snap.get("minute", 1)
+            _score_h  = snap.get("score_h", 0)
+            _score_a  = snap.get("score_a", 0)
+            try:
+                _live_fair = calculate_live_fair_odds(
+                    snap, history, _minute, _score_h, _score_a, h_name, a_name)
+            except Exception:
+                _live_fair = None
+            try:
+                _fp_h = detect_false_pressure(snap, "h_", _minute)
+                _fp_a = detect_false_pressure(snap, "a_", _minute)
+            except Exception:
+                _fp_h = _fp_a = None
+            try:
+                _regime = detect_game_regime(snap, history, h_name, a_name)
+            except Exception:
+                _regime = None
+
             # Renderiza painel
             _render_dashboard(snap, history, h_name, a_name, home_id,
                               goal_sigs, corner_sigs, card_sigs,
-                              poll_count, POLL_INTERVAL, consciousness)
+                              poll_count, POLL_INTERVAL, consciousness,
+                              live_fair=_live_fair, regime=_regime,
+                              false_pressure_h=_fp_h, false_pressure_a=_fp_a)
 
             # Mantém histórico limitado
             history.append(snap)
