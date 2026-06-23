@@ -797,39 +797,70 @@ elif page == "📡  Trading Ao Vivo":
     st.markdown('<p style="color:#6B7280;font-size:0.82rem;margin-bottom:1.5rem">GII · Momentum · Win Probability · Trader Assistant · Auto-refresh</p>', unsafe_allow_html=True)
 
     if mod_err:
-        st.error(f"Erro no módulo:\n```\n{mod_err[:400]}\n```"); st.stop()
+        with st.expander("❌ Erro ao carregar engine", expanded=True):
+            st.code(mod_err[:800])
+        st.stop()
 
-    with st.spinner("Verificando partidas..."):
-        live_ms=fetch_live()
+    with st.spinner("Verificando partidas ao vivo..."):
+        live_ms = fetch_live()
+    day_ms = fetch_matches(date_str)
 
-    day_ms=fetch_matches(date_str)
+    # ── Modo de entrada ───────────────────────────────────────────────
+    mode = st.radio("Modo de seleção:", ["📋 Lista de partidas", "🔢 ID manual do fixture"],
+                    horizontal=True, key="live_mode")
 
-    if live_ms:
-        st.markdown(f'<div class="card card-green" style="margin-bottom:1rem"><div class="live-badge" style="display:inline-flex"><div class="live-dot"></div>{len(live_ms)} partida(s) ao vivo</div></div>', unsafe_allow_html=True)
-        use=live_ms
+    if mode == "🔢 ID manual do fixture":
+        st.markdown('<div class="card card-yellow" style="margin-bottom:1rem">ℹ️ Use quando não há partidas ao vivo na lista. Informe o Fixture ID da API-Football.</div>', unsafe_allow_html=True)
+        c_id, c_h, c_a, c_hid = st.columns(4)
+        with c_id:  fid_manual = st.number_input("Fixture ID", min_value=1, step=1, key="fid_manual")
+        with c_h:   h_manual   = st.text_input("Time Casa", key="h_manual", placeholder="ex: Brasil")
+        with c_a:   a_manual   = st.text_input("Time Fora", key="a_manual", placeholder="ex: Argentina")
+        with c_hid: hid_manual = st.number_input("Home Team ID", min_value=1, step=1, key="hid_manual")
+        lsel = {
+            "fixture_id": int(fid_manual),
+            "home_id":    int(hid_manual),
+            "home_name":  h_manual or "Casa",
+            "away_name":  a_manual or "Fora",
+            "score_h": 0, "score_a": 0, "minute": "--",
+        }
     else:
-        st.markdown('<div class="card card-yellow" style="margin-bottom:1rem">⚪ Nenhuma partida ao vivo — mostrando partidas do dia</div>', unsafe_allow_html=True)
-        use=day_ms
+        if live_ms:
+            st.markdown(f'<div class="card card-green" style="margin-bottom:0.5rem"><div class="live-badge" style="display:inline-flex"><div class="live-dot"></div>&nbsp;{len(live_ms)} partida(s) ao vivo</div></div>', unsafe_allow_html=True)
+            use = live_ms
+        elif day_ms:
+            st.markdown('<div class="card card-yellow" style="margin-bottom:0.5rem">⚪ Nenhuma partida ao vivo agora — mostrando jogos do dia (estatísticas ao vivo podem não estar disponíveis)</div>', unsafe_allow_html=True)
+            use = day_ms
+        else:
+            st.markdown(f"""
+            <div class="card card-red" style="margin-bottom:1rem">
+                <div style="font-size:0.9rem;font-weight:700;margin-bottom:6px">⚠️ Nenhuma partida encontrada</div>
+                <div style="font-size:0.82rem;color:#9CA3AF">
+                    Liga: Copa do Mundo 2026 (ID {WC_LEAGUE}) · Temporada {WC_SEASON} · Data: {date_str}<br/>
+                    Verifique se há jogos hoje ou use o <b>modo ID manual</b> acima.
+                </div>
+            </div>""", unsafe_allow_html=True)
+            if st.button("🔄 Tentar novamente", key="live_retry"):
+                st.cache_data.clear(); st.rerun()
+            st.stop()
 
-    if not use:
-        st.info("Nenhuma partida disponível."); st.stop()
+        live_opts = {}
+        for m in use:
+            h_t = m["teams"]["home"]; a_t = m["teams"]["away"]
+            gh  = m.get("goals",{}).get("home",0) or 0
+            ga  = m.get("goals",{}).get("away",0) or 0
+            mn  = m["fixture"]["status"].get("elapsed") or "--"
+            label = f"{h_t['name']}  {gh}–{ga}  {a_t['name']}  ({mn}')"
+            live_opts[label] = {
+                "fixture_id": m["fixture"]["id"], "home_id": h_t["id"],
+                "home_name": h_t["name"], "away_id": a_t["id"], "away_name": a_t["name"],
+                "score_h": gh, "score_a": ga, "minute": mn,
+            }
+        sel_live = st.selectbox("Partida:", list(live_opts.keys()), key="live_sel")
+        lsel = live_opts[sel_live]
 
-    live_opts={}
-    for m in use:
-        h_t=m["teams"]["home"]; a_t=m["teams"]["away"]
-        gh=m.get("goals",{}).get("home",0) or 0; ga=m.get("goals",{}).get("away",0) or 0
-        mn=m["fixture"]["status"].get("elapsed") or "--"
-        label=f"{h_t['name']}  {gh}–{ga}  {a_t['name']}  ({mn}')"
-        live_opts[label]={"fixture_id":m["fixture"]["id"],"home_id":h_t["id"],
-            "home_name":h_t["name"],"away_id":a_t["id"],"away_name":a_t["name"],
-            "score_h":gh,"score_a":ga,"minute":mn}
-
-    sel_live=st.selectbox("Partida:",list(live_opts.keys()),key="live_sel")
-    lsel=live_opts[sel_live]
-
-    c1,c2=st.columns([3,1])
-    with c1: run_btn=st.button("▶️ Atualizar Dashboard",type="primary",use_container_width=True,key="live_run")
-    with c2: auto=st.toggle("🔄 Auto (30s)",value=False,key="live_auto")
+    c1, c2 = st.columns([3, 1])
+    with c1: run_btn = st.button("▶️ Atualizar Dashboard", type="primary", use_container_width=True, key="live_run")
+    with c2: auto = st.toggle("🔄 Auto (30s)", value=False, key="live_auto")
 
     if "live_hist" not in st.session_state: st.session_state.live_hist=[]
     if "live_fid"  not in st.session_state: st.session_state.live_fid=None
@@ -839,6 +870,21 @@ elif page == "📡  Trading Ao Vivo":
     def _do_live():
         output,snap,new_hist,trader=run_live_snap(mod,lsel["fixture_id"],lsel["home_name"],lsel["away_name"],lsel["home_id"],st.session_state.live_hist)
         st.session_state.live_hist=new_hist
+
+        # If no snap data, show diagnostic card
+        if snap is None:
+            st.markdown(f"""
+            <div class="card card-yellow">
+                <div style="font-size:0.95rem;font-weight:700;margin-bottom:8px">⚠️ Sem dados ao vivo para este fixture</div>
+                <div style="font-size:0.82rem;color:#9CA3AF;line-height:1.7">
+                    Fixture ID: <code style="color:#FFC107">{lsel['fixture_id']}</code><br/>
+                    A partida pode ainda não ter começado ou as estatísticas ao vivo ainda não estão disponíveis na API.<br/>
+                    Tente atualizar em alguns minutos ou verifique o Fixture ID.
+                </div>
+            </div>""", unsafe_allow_html=True)
+            with st.expander("🔍 Resposta bruta da API", expanded=False):
+                st.code(output[:2000] if output else "(sem output)")
+            return
 
         # Score header
         st.markdown(f"""
