@@ -360,59 +360,157 @@ def run_live_snap(mod, fid, h_name, a_name, home_id, history=None):
     finally: builtins.input=ori
 
 # ── Report parser ──────────────────────────────────────────────────────
-def _cl(line): return re.sub(r'[║╔╠╚╝╗╣─═]','',line).strip()
+def _cl(line):
+    # Strip box-drawing chars and ANSI escape sequences
+    s = re.sub(r'\x1b\[[0-9;]*m', '', line)
+    s = re.sub(r'[║╔╠╚╝╗╣─═╟╙╘╒╓╫╪┤┬┴┼├┼]', '', s)
+    # Strip progress bar chars
+    s = re.sub(r'[█░▓▒]', '', s)
+    return s.strip()
 
 def parse_report(text):
-    d={}; lines=[_cl(l) for l in text.split("\n") if _cl(l)]
-    m=re.search(r"ENSEMBLE FINAL.*?Casa:\s*([\d.]+)%.*?Empate:\s*([\d.]+)%.*?Fora:\s*([\d.]+)%",text)
-    if m: d["ph"],d["pd"],d["pa"]=float(m.group(1)),float(m.group(2)),float(m.group(3))
-    models=[]
+    d = {}
+    raw_lines = text.split("\n")
+    lines = [_cl(l) for l in raw_lines if _cl(l)]
+
+    # ── Confidence score ──────────────────────────────────────────────
+    # "Confiança Global: 23.3/100" or "Score: 50/100"
+    cm = re.search(r'Confiança Global[:\s]+([\d.]+)/100', text)
+    if not cm:
+        cm = re.search(r'Score[:\s]+([\d.]+)/100', text)
+    d["conf"] = int(float(cm.group(1))) if cm else None
+
+    # ── Probabilities from VEREDICTO table ───────────────────────────
+    # Lines like: "║  Vitória Brasil                37%  ████░░  🔴 EVITAR  N/A ║"
+    verd_section = re.search(r'VEREDICTO FINAL.*?(?=╠|╚)', text, re.DOTALL)
+    ph = pd_ = pa = None
+    recs = []
+    market_lines = []
+    if verd_section:
+        for raw in verd_section.group().split("\n"):
+            cl = _cl(raw)
+            # Home win
+            m = re.search(r'Vitória\s+\w.*?(\d+)%', cl)
+            if m and ("Casa" in cl or "Mandante" in cl or ("Vitória" in cl and ph is None)):
+                ph = float(m.group(1))
+            # Draw
+            m = re.search(r'Empate.*?(\d+)%', cl)
+            if m and pd_ is None:
+                pd_ = float(m.group(1))
+            # Away win
+            # Second "Vitória" line is away
+            m = re.search(r'Vitória\s+\w.*?(\d+)%', cl)
+            if m and ph is not None and pa is None and float(m.group(1)) != ph:
+                pa = float(m.group(1))
+            # Market recommendation lines
+            for sig in ["ENTRADA FORTE", "ENTRADA", "AGUARDAR", "EVITAR"]:
+                if sig in cl.upper() and "MERCADO" not in cl.upper():
+                    # Extract market name (before %) and probability
+                    nm = re.sub(r'\d+%.*', '', cl).strip()
+                    nm = re.sub(r'(🟢|🟡|🟠|🔴|\s{2,})', ' ', nm).strip()
+                    if len(nm) > 2 and nm not in [r["name"] for r in recs]:
+                        prob_m = re.search(r'(\d+)%', cl)
+                        ev_m = re.search(r'([+\-][\d.]+)%', cl)
+                        odd_m = re.search(r'Odd[:\s]+([\d.]+)', cl)
+                        recs.append({
+                            "signal": sig,
+                            "name": nm[:50],
+                            "prob": float(prob_m.group(1)) if prob_m else 0,
+                            "ev": ev_m.group(1) + "%" if ev_m else "",
+                            "odd": float(odd_m.group(1)) if odd_m else 0,
+                        })
+                    break
+    # Fallback: search whole text for home/draw/away
+    if ph is None:
+        m = re.search(r'Vitória\s+(?:Mandante|Brasil|Casa)[^\n]*?(\d+)%', text)
+        if m: ph = float(m.group(1))
+    if pd_ is None:
+        m = re.search(r'Empate[^\n]*?(\d+)%', text)
+        if m: pd_ = float(m.group(1))
+    if pa is None:
+        m = re.search(r'Vitória\s+(?:Visitante|Argentina|Fora)[^\n]*?(\d+)%', text)
+        if m: pa = float(m.group(1))
+    # Last resort: LR output
+    if ph is None:
+        m = re.search(r'LR:\s*Casa=([\d.]+)%\s*Empate=([\d.]+)%\s*Fora=([\d.]+)%', text)
+        if m: ph, pd_, pa = float(m.group(1)), float(m.group(2)), float(m.group(3))
+
+    if ph: d["ph"] = ph
+    if pd_: d["pd"] = pd_
+    if pa: d["pa"] = pa
+    d["recs"] = recs
+
+    # ── Models: extract from Monte Carlo / LR / ELO sections ─────────
+    models = []
+    # Monte Carlo probabilities from table header row
+    mc_m = re.search(r'Vitória Mandante\s+([\d.]+)%', text)
+    draw_mc = re.search(r'Empate\s+([\d.]+)%.*?Vitória Mandante', text)  # before Mandante
+    away_mc = re.search(r'Vitória Visitante\s+([\d.]+)%', text)
+    if mc_m and away_mc:
+        # Monte Carlo (from the score table summary column)
+        mh = float(mc_m.group(1)); ma = float(away_mc.group(1))
+        # Draw = 100 - mh - ma
+        md = round(100 - mh - ma, 1)
+        models.append({"name": "Monte Carlo", "home": mh, "draw": max(md,0), "away": ma})
+    # LR (Machine Learning)
+    lr_m = re.search(r'LR:\s*Casa=([\d.]+)%\s*Empate=([\d.]+)%\s*Fora=([\d.]+)%', text)
+    if lr_m:
+        models.append({"name": "Machine Learning", "home": float(lr_m.group(1)), "draw": float(lr_m.group(2)), "away": float(lr_m.group(3))})
+    # ELO
+    elo_m = re.search(r'Vitória Mand\.:\s*([\d.]+)%\s*\|?\s*Empate:\s*([\d.]+)%\s*\|?\s*Vitória Visit\.:\s*([\d.]+)%', text)
+    if elo_m:
+        models.append({"name": "ELO", "home": float(elo_m.group(1)), "draw": float(elo_m.group(2)), "away": float(elo_m.group(3))})
+    # Poisson — look for λ-based output
+    poisson_m = re.search(r'Poisson.*?Casa:\s*([\d.]+)%.*?Empate:\s*([\d.]+)%.*?Fora:\s*([\d.]+)%', text, re.DOTALL)
+    if not poisson_m:
+        # Try alternate: use same values as Monte Carlo if no specific Poisson line
+        pass
+    if poisson_m:
+        models.append({"name": "Poisson", "home": float(poisson_m.group(1)), "draw": float(poisson_m.group(2)), "away": float(poisson_m.group(3))})
+    d["models"] = models
+
+    # ── EV+ bets (VALUE BETTING section) ──────────────────────────────
+    bets = []
+    ev_section = re.search(r'VALUE BETTING.*?(?=╠|╚|BANKROLL)', text, re.DOTALL | re.IGNORECASE)
+    if ev_section:
+        for raw in ev_section.group().split("\n"):
+            cl = _cl(raw)
+            m2 = re.match(r'(\d)\s+(.+?)\s+([\d.]+)%\s+([\d.]+)\s+([\d.]+)\s+([+\-][\d.]+)%\s+([\d.]+%|SKIP)', cl)
+            if m2:
+                bets.append({
+                    "rank": m2.group(1), "name": m2.group(2).strip(),
+                    "prob": float(m2.group(3)), "odd": float(m2.group(4)),
+                    "ev": float(m2.group(6)), "kelly": m2.group(7)
+                })
+    d["bets"] = bets
+
+    # ── Metrics (MÉTRICAS OFENSIVAS table) ───────────────────────────
+    metrics = []
+    in_m = False
+    stop_keys = ["PRESSURE", "ESCANTEIO", "ÁRBITRO", "ENSEMBLE", "VEREDICTO", "MONTE", "ELO", "TÁTIC"]
     for line in lines:
-        for nm in ["Monte Carlo","Poisson","Machine Learning","API-Football","ELO"]:
-            if nm in line:
-                pcts=re.findall(r"([\d.]+)%",line)
-                if len(pcts)>=3: models.append({"name":nm,"home":float(pcts[-3]),"draw":float(pcts[-2]),"away":float(pcts[-1])})
-                break
-    d["models"]=models
-    bets=[]
-    in_ev=False
-    for line in lines:
-        if "VALUE BETTING" in line.upper(): in_ev=True; continue
-        if in_ev:
-            if "BANKROLL" in line.upper() or "RECOMENDAÇÃO" in line.upper(): break
-            m2=re.match(r"(\d)\s+(.+?)\s+([\d.]+)%\s+([\d.]+)\s+([\d.]+)\s+([+\-][\d.]+)%\s+([\d.]+%|SKIP)",line)
-            if m2: bets.append({"rank":m2.group(1),"name":m2.group(2).strip(),"prob":float(m2.group(3)),"odd":float(m2.group(4)),"ev":float(m2.group(6)),"kelly":m2.group(7)})
-    d["bets"]=bets
-    cm=re.search(r"Score:\s*(\d+)/100",text)
-    d["conf"]=int(cm.group(1)) if cm else None
-    recs=[]
-    for line in lines:
-        for sig in ["ENTRADA FORTE","ENTRADA","AGUARDAR","EVITAR"]:
-            if sig in line.upper():
-                em=re.search(r"([+\-][\d.]+)%",line); sm=re.search(r"R\$([\d,]+)",line)
-                nm2=re.sub(r"(🟢|🟡|🟠|🔴)","",line); nm2=re.sub(r"(ENTRADA FORTE|ENTRADA|AGUARDAR|EVITAR|EV:.*|Kelly:.*|STAKE:.*)", "",nm2,flags=re.I).strip()
-                recs.append({"signal":sig,"name":nm2[:45],"ev":em.group(1)+"%"if em else "","stake":"R$"+sm.group(1) if sm else "SKIP"})
-                break
-    d["recs"]=recs
-    d["metrics"]=[]
-    in_m=False
-    for line in lines:
-        if "MÉTRICAS OFENSIVAS" in line.upper(): in_m=True; continue
+        if "MÉTRICAS OFENSIVAS" in line.upper(): in_m = True; continue
         if in_m:
-            if any(k in line.upper() for k in ["PRESSURE","ESCANTEIO","ÁRBITRO","ENSEMBLE","PREDIÇÃO"]): break
-            nums=re.findall(r"([\d.]+)%?",line)
-            nm3=re.sub(r"[\d.%]+.*","",line).strip()
-            if len(nums)>=2 and nm3 and len(nm3)>3:
-                d["metrics"].append({"label":nm3,"h":float(nums[-2]),"a":float(nums[-1])})
-    d["metrics"]=d["metrics"][:7]
-    narr_lines=[]
-    in_n=False
+            if any(k in line.upper() for k in stop_keys): break
+            # Two numeric columns: "Label    1.20   1.20"
+            nums = re.findall(r'([\d.]+)', line)
+            label = re.sub(r'[\d.%\s]+$', '', line).strip()
+            label = re.sub(r'\s{2,}', ' ', label).strip()
+            if len(nums) >= 2 and label and len(label) > 3 and not label.startswith("MÉTRICA"):
+                try:
+                    metrics.append({"label": label, "h": float(nums[-2]), "a": float(nums[-1])})
+                except: pass
+    d["metrics"] = metrics[:7]
+
+    # ── Narrative ─────────────────────────────────────────────────────
+    narr_lines = []
+    in_n = False
     for line in lines:
-        if "NARRATIVA" in line.upper(): in_n=True; continue
+        if "NARRATIVA" in line.upper() and "ANÁLISE" in line.upper(): in_n = True; continue
         if in_n:
-            if any(k in line.upper() for k in ["RECOMENDAÇÃO","RANKING","VALUE","BANKROLL"]): break
-            if line: narr_lines.append(line)
-    d["narrative"]=" ".join(narr_lines)
+            if any(k in line.upper() for k in ["RECOMENDAÇÃO","RANKING","VALUE","BANKROLL","VEREDICTO","CONFIANÇA","QUALIDADE"]): break
+            if line and len(line) > 10: narr_lines.append(line)
+    d["narrative"] = " ".join(narr_lines[:8])
     return d
 
 # ── HTML helpers ──────────────────────────────────────────────────────
