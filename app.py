@@ -253,10 +253,28 @@ def _load_module():
         builtins.input = ori
     mod._clear = lambda: None
     mod.CLEAR_SCREEN = False
+
+    # Inject missing function that the module calls but never defines
+    def _get_fixture_statistics(fixture_id):
+        try:
+            r = requests.get(f"{BASE_URL}/fixtures/statistics",
+                             headers=HEADERS, params={"fixture": fixture_id}, timeout=15)
+            r.raise_for_status()
+            return r.json().get("response", [])
+        except Exception:
+            return []
+
+    mod.get_fixture_statistics = _get_fixture_statistics
     return mod
 
 def get_module():
-    try: return _load_module(), None
+    try:
+        mod = _load_module()
+        # Ensure injected functions are present (may be missing on cached versions)
+        if not hasattr(mod, "get_fixture_statistics"):
+            _load_module.clear()
+            mod = _load_module()
+        return mod, None
     except Exception:
         import traceback; return None, traceback.format_exc()
 
