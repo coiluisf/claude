@@ -227,6 +227,17 @@ def get_fixture_player_stats(fixture_id):
         return []
 
 
+def get_fixture_statistics(fixture_id):
+    """Busca estatísticas ao vivo/pós-jogo de uma partida via /fixtures/statistics."""
+    try:
+        url = f"{BASE_URL}/fixtures/statistics"
+        params = {"fixture": fixture_id}
+        res = requests.get(url, headers=headers, params=params).json()
+        return res.get("response", [])
+    except Exception:
+        return []
+
+
 def aggregate_player_event_history(fixtures, team_id):
     """Agrega, a partir de jogos passados reais, quais jogadores mais
     chutaram a gol e mais receberam cartão. Retorna listas ordenadas
