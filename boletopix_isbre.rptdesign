@@ -1,14 +1,9 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <report xmlns="http://www.eclipse.org/birt/2005/design" version="3.2.23" id="1">
-    <property name="createdBy">Claude Code - BIRT Template from JasperReports</property>
+    <property name="createdBy">Claude Code - BIRT from JasperReports</property>
     <property name="title">Boleto PIX ISBRE</property>
-    <property name="comments">Recreated from JasperReports BoletoPIX_ISBRE.jrxml</property>
     <property name="units">pt</property>
-    <property name="iconFile">/templates/blank_report.gif</property>
-    <property name="bidiLayoutOrientation">ltr</property>
-    <property name="imageDPI">96</property>
 
-    <!-- PAGE SETUP -->
     <page-setup>
         <simple-master-page name="BoletoPIX" id="2">
             <property name="type">custom</property>
@@ -18,14 +13,11 @@
             <property name="leftMargin">10pt</property>
             <property name="bottomMargin">0pt</property>
             <property name="rightMargin">10pt</property>
-            <property name="headerHeight">0pt</property>
-            <property name="footerHeight">0pt</property>
         </simple-master-page>
     </page-setup>
 
-    <!-- DATA SOURCES -->
     <data-sources>
-        <oda-data-source extensionID="org.eclipse.birt.report.data.oda.jdbc" name="Oracle" id="7">
+        <oda-data-source extensionID="org.eclipse.birt.report.data.oda.jdbc" name="Oracle" id="3">
             <property name="odaDriverClass">oracle.jdbc.driver.OracleDriver</property>
             <property name="odaURL">jdbc:oracle:thin:@localhost:1521:ORCL</property>
             <property name="odaUser">seu_usuario</property>
@@ -33,9 +25,8 @@
         </oda-data-source>
     </data-sources>
 
-    <!-- DATA SETS -->
     <data-sets>
-        <oda-data-set extensionID="org.eclipse.birt.report.data.oda.jdbc.JdbcSelectDataSet" name="BoletoDataSet" id="8">
+        <oda-data-set extensionID="org.eclipse.birt.report.data.oda.jdbc.JdbcSelectDataSet" name="BoletoDataSet" id="4">
             <property name="dataSource">Oracle</property>
             <text-property name="queryText">SELECT pes.nome,
        SUBSTR(lpad(p.cpf,11,0), 1, 3) || '.' ||
@@ -163,14 +154,13 @@
         </oda-data-set>
     </data-sets>
 
-    <!-- BODY / DETAIL -->
     <body>
-        <section id="9">
-            <band id="10" height="1200pt">
-                <!-- ========== SEÇÃO 1: RECIBO PAGADOR ========== -->
+        <section id="5">
+            <band id="6" height="1200pt">
+                <!-- SEÇÃO 1: RECIBO PAGADOR -->
 
-                <!-- Logo ISBRE (topo esquerdo) -->
-                <image id="logo1">
+                <!-- Logo ISBRE -->
+                <image id="7">
                     <property name="x">7pt</property>
                     <property name="y">50pt</property>
                     <property name="width">109pt</property>
@@ -179,8 +169,8 @@
                     <expression name="imageSource">"D:/ISBRE/PNG/ISBRElogo decodificador.png"</expression>
                 </image>
 
-                <!-- Logo BB (lado esquerdo) -->
-                <image id="logobb1">
+                <!-- Logo BB -->
+                <image id="8">
                     <property name="x">7pt</property>
                     <property name="y">159pt</property>
                     <property name="width">20pt</property>
@@ -189,8 +179,8 @@
                     <expression name="imageSource">"D:/ISBRE/Ico/bb.png"</expression>
                 </image>
 
-                <!-- "Banco do Brasil" (esquerda) -->
-                <label id="banco1">
+                <!-- Banco do Brasil (texto) -->
+                <text id="9">
                     <property name="x">32pt</property>
                     <property name="y">165pt</property>
                     <property name="width">111pt</property>
@@ -198,11 +188,11 @@
                     <property name="fontSize">12pt</property>
                     <property name="fontWeight">bold</property>
                     <property name="fontFamily">Arial</property>
-                    <text>Banco do Brasil</text>
-                </label>
+                    <text-property name="content">Banco do Brasil</text-property>
+                </text>
 
-                <!-- "Recibo do Pagador" (direita) -->
-                <label id="recibo1">
+                <!-- Recibo do Pagador -->
+                <text id="10">
                     <property name="x">477pt</property>
                     <property name="y">166pt</property>
                     <property name="width">90pt</property>
@@ -211,43 +201,33 @@
                     <property name="fontWeight">bold</property>
                     <property name="fontFamily">Arial</property>
                     <property name="textAlign">center</property>
-                    <text>Recibo do Pagador</text>
-                </label>
+                    <text-property name="content">Recibo do Pagador</text-property>
+                </text>
 
-                <!-- CNPJ e identificação -->
-                <label id="cnpj1">
+                <!-- CNPJ -->
+                <text id="11">
                     <property name="x">7pt</property>
                     <property name="y">212pt</property>
                     <property name="width">300pt</property>
                     <property name="height">8pt</property>
                     <property name="fontSize">6pt</property>
                     <property name="fontFamily">Arial</property>
-                    <text>Fundação BRDE de Previdência Complementar – ISBRE  /  89.172.084/0001-54</text>
-                </label>
+                    <text-property name="content">Fundação BRDE de Previdência Complementar – ISBRE  /  89.172.084/0001-54</text-property>
+                </text>
 
-                <!-- Linha divisória top -->
-                <line id="line1">
-                    <property name="x">1pt</property>
-                    <property name="y">140pt</property>
-                    <property name="width">573pt</property>
-                    <property name="height">0pt</property>
-                    <property name="borderStyle">dashed</property>
-                    <property name="borderWidth">0.5pt</property>
-                </line>
-
-                <!-- LOCAL DE PAGAMENTO label -->
-                <label id="local1">
+                <!-- LOCAL DO PAGAMENTO -->
+                <text id="12">
                     <property name="x">7pt</property>
                     <property name="y">183pt</property>
                     <property name="width">300pt</property>
                     <property name="height">7pt</property>
                     <property name="fontSize">5pt</property>
                     <property name="fontFamily">Arial</property>
-                    <text>LOCAL DO PAGAMENTO</text>
-                </label>
+                    <text-property name="content">LOCAL DO PAGAMENTO</text-property>
+                </text>
 
-                <!-- "Pagável em qualquer banco" -->
-                <label id="pagavel1">
+                <!-- Pagável em qualquer banco -->
+                <text id="13">
                     <property name="x">7pt</property>
                     <property name="y">193pt</property>
                     <property name="width">209pt</property>
@@ -255,43 +235,22 @@
                     <property name="fontSize">7pt</property>
                     <property name="fontFamily">Arial</property>
                     <property name="fontWeight">bold</property>
-                    <text>Pagável em qualquer banco.</text>
-                </label>
-
-                <!-- Linha separadora -->
-                <line id="line2">
-                    <property name="x">5pt</property>
-                    <property name="y">201pt</property>
-                    <property name="width">568pt</property>
-                    <property name="height">0pt</property>
-                    <property name="borderStyle">solid</property>
-                    <property name="borderWidth">1pt</property>
-                </line>
-
-                <!-- NOME DO BENEFICIÁRIO label -->
-                <label id="benef_label1">
-                    <property name="x">7pt</property>
-                    <property name="y">203pt</property>
-                    <property name="width">300pt</property>
-                    <property name="height">7pt</property>
-                    <property name="fontSize">5pt</property>
-                    <property name="fontFamily">Arial</property>
-                    <text>NOME DO BENEFICIÁRIO/CPF/CNPJ</text>
-                </label>
+                    <text-property name="content">Pagável em qualquer banco.</text-property>
+                </text>
 
                 <!-- DATA DO DOCUMENTO label -->
-                <label id="data_doc1">
+                <text id="14">
                     <property name="x">6pt</property>
                     <property name="y">223pt</property>
                     <property name="width">68pt</property>
                     <property name="height">8pt</property>
                     <property name="fontSize">5pt</property>
                     <property name="fontFamily">Arial</property>
-                    <text>DATA DO DOCUMENTO</text>
-                </label>
+                    <text-property name="content">DATA DO DOCUMENTO</text-property>
+                </text>
 
                 <!-- DATA DO DOCUMENTO value -->
-                <text-data id="data_doc_val1">
+                <text id="15">
                     <property name="x">6pt</property>
                     <property name="y">231pt</property>
                     <property name="width">65pt</property>
@@ -299,24 +258,22 @@
                     <property name="fontSize">6pt</property>
                     <property name="fontFamily">Arial</property>
                     <property name="textAlign">center</property>
-                    <expression name="valueExpr">new java.util.Date()</expression>
-                    <property name="contentType">html</property>
-                    <format-number pattern="dd/MM/yyyy"/>
-                </text-data>
+                    <expression name="content">new java.text.SimpleDateFormat("dd/MM/yyyy").format(new java.util.Date())</expression>
+                </text>
 
                 <!-- NR. DOCUMENTO label -->
-                <label id="nr_doc1">
+                <text id="16">
                     <property name="x">74pt</property>
                     <property name="y">223pt</property>
                     <property name="width">54pt</property>
                     <property name="height">8pt</property>
                     <property name="fontSize">5pt</property>
                     <property name="fontFamily">Arial</property>
-                    <text>NR. DOCUMENTO</text>
-                </label>
+                    <text-property name="content">NR. DOCUMENTO</text-property>
+                </text>
 
                 <!-- NR. DOCUMENTO value -->
-                <text-data id="nr_doc_val1">
+                <text id="17">
                     <property name="x">74pt</property>
                     <property name="y">231pt</property>
                     <property name="width">63pt</property>
@@ -324,165 +281,55 @@
                     <property name="fontSize">6pt</property>
                     <property name="fontFamily">Arial</property>
                     <property name="textAlign">center</property>
-                    <expression name="valueExpr">row["NRDOCUMENTO"]</expression>
-                    <property name="contentType">html</property>
-                </text-data>
-
-                <!-- Linha vertical separadora -->
-                <line id="line_vert1">
-                    <property name="x">145pt</property>
-                    <property name="y">166pt</property>
-                    <property name="width">0pt</property>
-                    <property name="height">15pt</property>
-                    <property name="borderWidth">2pt</property>
-                </line>
-
-                <line id="line_vert2">
-                    <property name="x">186pt</property>
-                    <property name="y">166pt</property>
-                    <property name="width">0pt</property>
-                    <property name="height">15pt</property>
-                    <property name="borderWidth">2pt</property>
-                </line>
+                    <expression name="content">row["NRDOCUMENTO"]</expression>
+                </text>
 
                 <!-- DATA DO PROCESSAMENTO label -->
-                <label id="proc_label1">
+                <text id="18">
                     <property name="x">221pt</property>
                     <property name="y">223pt</property>
                     <property name="width">88pt</property>
                     <property name="height">8pt</property>
                     <property name="fontSize">5pt</property>
                     <property name="fontFamily">Arial</property>
-                    <text>DATA DO PROCESSAMENTO</text>
-                </label>
+                    <text-property name="content">DATA DO PROCESSAMENTO</text-property>
+                </text>
 
                 <!-- DATA DO PROCESSAMENTO value -->
-                <text-data id="proc_val1">
+                <text id="19">
                     <property name="x">221pt</property>
                     <property name="y">232pt</property>
                     <property name="width">90pt</property>
                     <property name="height">8pt</property>
                     <property name="fontSize">6pt</property>
                     <property name="fontFamily">Arial</property>
-                    <expression name="valueExpr">row["DATA_PROCESSAMENTO"]</expression>
-                    <property name="contentType">html</property>
-                </text-data>
+                    <expression name="content">row["DATA_PROCESSAMENTO"]</expression>
+                </text>
 
-                <!-- ESPÉCIE DOC. label -->
-                <label id="especie_doc1">
-                    <property name="x">141pt</property>
-                    <property name="y">223pt</property>
-                    <property name="width">37pt</property>
-                    <property name="height">8pt</property>
-                    <property name="fontSize">5pt</property>
-                    <property name="fontFamily">Arial</property>
-                    <text>ESPÉCIE DOC.</text>
-                </label>
-
-                <!-- ACEITE label -->
-                <label id="aceite1">
-                    <property name="x">180pt</property>
-                    <property name="y">223pt</property>
-                    <property name="width">22pt</property>
-                    <property name="height">8pt</property>
-                    <property name="fontSize">5pt</property>
-                    <property name="fontFamily">Arial</property>
-                    <text>ACEITE</text>
-                </label>
-
-                <!-- N (Aceite) -->
-                <label id="aceite_n1">
-                    <property name="x">180pt</property>
-                    <property name="y">232pt</property>
-                    <property name="width">36pt</property>
-                    <property name="height">8pt</property>
-                    <property name="fontSize">6pt</property>
-                    <property name="fontFamily">Arial</property>
-                    <property name="textAlign">center</property>
-                    <text>N</text>
-                </label>
-
-                <!-- CARTEIRA label (direita) -->
-                <label id="carteira1">
+                <!-- CARTEIRA label -->
+                <text id="20">
                     <property name="x">74pt</property>
                     <property name="y">243pt</property>
                     <property name="width">29pt</property>
                     <property name="height">8pt</property>
                     <property name="fontSize">5pt</property>
                     <property name="fontFamily">Arial</property>
-                    <text>CARTEIRA</text>
-                </label>
-
-                <!-- ESPÉCIE label -->
-                <label id="especie1">
-                    <property name="x">109pt</property>
-                    <property name="y">243pt</property>
-                    <property name="width">24pt</property>
-                    <property name="height">8pt</property>
-                    <property name="fontSize">5pt</property>
-                    <property name="fontFamily">Arial</property>
-                    <text>ESPÉCIE</text>
-                </label>
-
-                <!-- QUANTIDADE label -->
-                <label id="qtd1">
-                    <property name="x">141pt</property>
-                    <property name="y">243pt</property>
-                    <property name="width">42pt</property>
-                    <property name="height">8pt</property>
-                    <property name="fontSize">5pt</property>
-                    <property name="fontFamily">Arial</property>
-                    <text>QUANTIDADE</text>
-                </label>
-
-                <!-- USO DO BANCO label -->
-                <label id="uso_banco1">
-                    <property name="x">7pt</property>
-                    <property name="y">243pt</property>
-                    <property name="width">48pt</property>
-                    <property name="height">8pt</property>
-                    <property name="fontSize">5pt</property>
-                    <property name="fontFamily">Arial</property>
-                    <text>USO DO BANCO</text>
-                </label>
+                    <text-property name="content">CARTEIRA</text-property>
+                </text>
 
                 <!-- VALOR label -->
-                <label id="valor_label1">
+                <text id="21">
                     <property name="x">221pt</property>
                     <property name="y">243pt</property>
                     <property name="width">70pt</property>
                     <property name="height">8pt</property>
                     <property name="fontSize">5pt</property>
                     <property name="fontFamily">Arial</property>
-                    <text>VALOR</text>
-                </label>
+                    <text-property name="content">VALOR</text-property>
+                </text>
 
-                <!-- R$ (valor) -->
-                <label id="r_label1">
-                    <property name="x">111pt</property>
-                    <property name="y">253pt</property>
-                    <property name="width">25pt</property>
-                    <property name="height">8pt</property>
-                    <property name="fontSize">6pt</property>
-                    <property name="fontFamily">Arial</property>
-                    <property name="textAlign">center</property>
-                    <text>R$</text>
-                </label>
-
-                <!-- VALOR (números) -->
-                <label id="valor_nums1">
-                    <property name="x">152pt</property>
-                    <property name="y">253pt</property>
-                    <property name="width">50pt</property>
-                    <property name="height">8pt</property>
-                    <property name="fontSize">6pt</property>
-                    <property name="fontFamily">Arial</property>
-                    <property name="textAlign">center</property>
-                    <text>0,0000</text>
-                </label>
-
-                <!-- VALOR (do banco) -->
-                <text-data id="valor_val1">
+                <!-- VALOR value -->
+                <text id="22">
                     <property name="x">424pt</property>
                     <property name="y">252pt</property>
                     <property name="width">147pt</property>
@@ -490,24 +337,22 @@
                     <property name="fontSize">6pt</property>
                     <property name="fontFamily">Arial</property>
                     <property name="textAlign">right</property>
-                    <expression name="valueExpr">row["VALOR"]</expression>
-                    <property name="contentType">html</property>
-                    <format-number pattern="¤ #,##0.00;¤ -#,##0.00"/>
-                </text-data>
+                    <expression name="content">new java.text.DecimalFormat("¤ #,##0.00").format(row["VALOR"])</expression>
+                </text>
 
                 <!-- DATA DE VENCIMENTO label (direita) -->
-                <label id="data_venc_label1">
+                <text id="23">
                     <property name="x">428pt</property>
                     <property name="y">183pt</property>
                     <property name="width">133pt</property>
                     <property name="height">8pt</property>
                     <property name="fontSize">5pt</property>
                     <property name="fontFamily">Arial</property>
-                    <text>DATA DE VENCIMENTO</text>
-                </label>
+                    <text-property name="content">DATA DE VENCIMENTO</text-property>
+                </text>
 
                 <!-- DATA DE VENCIMENTO value -->
-                <text-data id="data_venc_val1">
+                <text id="24">
                     <property name="x">463pt</property>
                     <property name="y">192pt</property>
                     <property name="width">107pt</property>
@@ -515,214 +360,88 @@
                     <property name="fontSize">6pt</property>
                     <property name="fontFamily">Arial</property>
                     <property name="textAlign">right</property>
-                    <expression name="valueExpr">row["DATA_VENCIMENTO"]</expression>
-                    <property name="contentType">html</property>
-                </text-data>
-
-                <!-- AGÊNCIA/CÓDIGO label -->
-                <label id="agencia_label1">
-                    <property name="x">428pt</property>
-                    <property name="y">203pt</property>
-                    <property name="width">143pt</property>
-                    <property name="height">8pt</property>
-                    <property name="fontSize">5pt</property>
-                    <property name="fontFamily">Arial</property>
-                    <text>AGÊNCIA/CÓDIGO DO BENEFICIÁRIO</text>
-                </label>
-
-                <!-- AGÊNCIA/CÓDIGO value -->
-                <label id="agencia_val1">
-                    <property name="x">431pt</property>
-                    <property name="y">211pt</property>
-                    <property name="width">140pt</property>
-                    <property name="height">9pt</property>
-                    <property name="fontSize">6pt</property>
-                    <property name="fontFamily">Arial</property>
-                    <property name="textAlign">center</property>
-                    <text>3798-2 / 9.216-9</text>
-                </label>
+                    <expression name="content">row["DATA_VENCIMENTO"]</expression>
+                </text>
 
                 <!-- NOSSO NÚMERO label -->
-                <label id="nosso_label1">
+                <text id="25">
                     <property name="x">428pt</property>
                     <property name="y">223pt</property>
                     <property name="width">143pt</property>
                     <property name="height">8pt</property>
                     <property name="fontSize">5pt</property>
                     <property name="fontFamily">Arial</property>
-                    <text>NOSSO NÚMERO</text>
-                </label>
+                    <text-property name="content">NOSSO NÚMERO</text-property>
+                </text>
 
                 <!-- NOSSO NÚMERO value -->
-                <text-data id="nosso_val1">
+                <text id="26">
                     <property name="x">431pt</property>
                     <property name="y">231pt</property>
                     <property name="width">140pt</property>
                     <property name="height">9pt</property>
                     <property name="fontSize">6pt</property>
                     <property name="fontFamily">Arial</property>
-                    <expression name="valueExpr">row["NOSSO_NUMERO"]</expression>
-                    <property name="contentType">html</property>
-                </text-data>
-
-                <!-- (-) DESCONTO label -->
-                <label id="desconto_label1">
-                    <property name="x">428pt</property>
-                    <property name="y">264pt</property>
-                    <property name="width">133pt</property>
-                    <property name="height">8pt</property>
-                    <property name="fontSize">5pt</property>
-                    <property name="fontFamily">Arial</property>
-                    <text>(-) DESCONTO/ABATIMENTO</text>
-                </label>
-
-                <!-- (+) MORA/MULTA label -->
-                <label id="mora_label1">
-                    <property name="x">428pt</property>
-                    <property name="y">303pt</property>
-                    <property name="width">133pt</property>
-                    <property name="height">8pt</property>
-                    <property name="fontSize">5pt</property>
-                    <property name="fontFamily">Arial</property>
-                    <text>(+) MORA/MULTA</text>
-                </label>
-
-                <!-- (-) OUTRAS DEDUÇÕES label -->
-                <label id="deducoes_label1">
-                    <property name="x">428pt</property>
-                    <property name="y">282pt</property>
-                    <property name="width">133pt</property>
-                    <property name="height">8pt</property>
-                    <property name="fontSize">5pt</property>
-                    <property name="fontFamily">Arial</property>
-                    <text>(-) OUTRAS DEDUÇÕES</text>
-                </label>
-
-                <!-- (+) OUTROS ACRÉSCIMOS label -->
-                <label id="acrescimos_label1">
-                    <property name="x">428pt</property>
-                    <property name="y">323pt</property>
-                    <property name="width">133pt</property>
-                    <property name="height">8pt</property>
-                    <property name="fontSize">5pt</property>
-                    <property name="fontFamily">Arial</property>
-                    <text>(+) OUTROS ACRÉSCIMOS</text>
-                </label>
-
-                <!-- (=) VALOR DO DOCUMENTO label -->
-                <label id="valor_doc_label1">
-                    <property name="x">428pt</property>
-                    <property name="y">243pt</property>
-                    <property name="width">133pt</property>
-                    <property name="height">8pt</property>
-                    <property name="fontSize">5pt</property>
-                    <property name="fontFamily">Arial</property>
-                    <text>(=) VALOR DO DOCUMENTO</text>
-                </label>
-
-                <!-- (=) VALOR COBRADO label -->
-                <label id="cobrado_label1">
-                    <property name="x">428pt</property>
-                    <property name="y">341pt</property>
-                    <property name="width">133pt</property>
-                    <property name="height">8pt</property>
-                    <property name="fontSize">5pt</property>
-                    <property name="fontFamily">Arial</property>
-                    <text>(=) VALOR COBRADO</text>
-                </label>
-
-                <!-- Linha divisória -->
-                <line id="line3">
-                    <property name="x">5pt</property>
-                    <property name="y">241pt</property>
-                    <property name="width">569pt</property>
-                    <property name="height">0pt</property>
-                    <property name="borderWidth">1.25pt</property>
-                </line>
+                    <expression name="content">row["NOSSO_NUMERO"]</expression>
+                </text>
 
                 <!-- NOME DO PAGADOR label -->
-                <label id="pag_label1">
+                <text id="27">
                     <property name="x">7pt</property>
                     <property name="y">323pt</property>
                     <property name="width">112pt</property>
                     <property name="height">7pt</property>
                     <property name="fontSize">5pt</property>
                     <property name="fontFamily">Arial</property>
-                    <text>NOME DO PAGADOR/CPF/CNPJ/ENDEREÇO</text>
-                </label>
+                    <text-property name="content">NOME DO PAGADOR/CPF/CNPJ/ENDEREÇO</text-property>
+                </text>
 
-                <!-- NOME DO PAGADOR value -->
-                <text-data id="pag_nome1">
+                <!-- NOME value -->
+                <text id="28">
                     <property name="x">9pt</property>
                     <property name="y">331pt</property>
                     <property name="width">298pt</property>
                     <property name="height">9pt</property>
                     <property name="fontSize">6pt</property>
                     <property name="fontFamily">Arial</property>
-                    <expression name="valueExpr">row["NOME"]</expression>
-                    <property name="contentType">html</property>
-                </text-data>
+                    <expression name="content">row["NOME"]</expression>
+                </text>
 
-                <!-- CPF/CNPJ value -->
-                <text-data id="pag_cpf1">
+                <!-- CPF value -->
+                <text id="29">
                     <property name="x">9pt</property>
                     <property name="y">349pt</property>
                     <property name="width">298pt</property>
                     <property name="height">9pt</property>
                     <property name="fontSize">6pt</property>
                     <property name="fontFamily">Arial</property>
-                    <expression name="valueExpr">"CPF/CNPJ: " + row["CPF"]</expression>
-                    <property name="contentType">html</property>
-                </text-data>
+                    <expression name="content">"CPF/CNPJ: " + row["CPF"]</expression>
+                </text>
 
                 <!-- ENDEREÇO value -->
-                <text-data id="pag_addr1">
+                <text id="30">
                     <property name="x">9pt</property>
                     <property name="y">340pt</property>
                     <property name="width">298pt</property>
                     <property name="height">9pt</property>
                     <property name="fontSize">6pt</property>
                     <property name="fontFamily">Arial</property>
-                    <expression name="valueExpr">row["ENDERECO"]</expression>
-                    <property name="contentType">html</property>
-                </text-data>
-
-                <!-- INFORMAÇÕES DE RESPONSABILIDADE label -->
-                <label id="info_resp1">
-                    <property name="x">7pt</property>
-                    <property name="y">264pt</property>
-                    <property name="width">154pt</property>
-                    <property name="height">8pt</property>
-                    <property name="fontSize">5pt</property>
-                    <property name="fontFamily">Arial</property>
-                    <text>INFORMAÇÕES DE RESPONSABILIDADE DO BENEFICIÁRIO</text>
-                </label>
+                    <expression name="content">row["ENDERECO"]</expression>
+                </text>
 
                 <!-- DESCRIÇÃO -->
-                <text-data id="descr1">
+                <text id="31">
                     <property name="x">11pt</property>
                     <property name="y">272pt</property>
                     <property name="width">405pt</property>
                     <property name="height">51pt</property>
                     <property name="fontSize">6pt</property>
                     <property name="fontFamily">Arial</property>
-                    <expression name="valueExpr">row["DESCRICAO"]</expression>
-                    <property name="contentType">html</property>
-                </text-data>
-
-                <!-- SACADOR/AVALISTA -->
-                <label id="sacador1">
-                    <property name="x">7pt</property>
-                    <property name="y">682pt</property>
-                    <property name="width">63pt</property>
-                    <property name="height">8pt</property>
-                    <property name="fontSize">5pt</property>
-                    <property name="fontFamily">Arial</property>
-                    <text>SACADOR/AVALISTA</text>
-                </label>
+                    <expression name="content">row["DESCRICAO"]</expression>
+                </text>
 
                 <!-- LINHA DIGITÁVEL (Recibo 1) -->
-                <text-data id="linha_dig1">
+                <text id="32">
                     <property name="x">193pt</property>
                     <property name="y">165pt</property>
                     <property name="width">275pt</property>
@@ -731,24 +450,34 @@
                     <property name="fontFamily">Arial Black</property>
                     <property name="fontWeight">bold</property>
                     <property name="textAlign">right</property>
-                    <expression name="valueExpr">row["LINHA_DIGITAVEL"]</expression>
-                    <property name="contentType">html</property>
-                </text-data>
+                    <expression name="content">row["LINHA_DIGITAVEL"]</expression>
+                </text>
 
-                <!-- Cód. Baixa -->
-                <label id="cod_baixa1">
-                    <property name="x">314pt</property>
-                    <property name="y">353pt</property>
-                    <property name="width">100pt</property>
-                    <property name="height">8pt</property>
+                <!-- PIX TEXT -->
+                <text id="33">
+                    <property name="x">5pt</property>
+                    <property name="y">755pt</property>
+                    <property name="width">150pt</property>
+                    <property name="height">10pt</property>
+                    <property name="fontSize">7pt</property>
+                    <property name="fontFamily">Arial</property>
+                    <property name="fontWeight">bold</property>
+                    <text-property name="content">Pague esta cobrança com PIX</text-property>
+                </text>
+
+                <!-- PIX QR CODE TEXT -->
+                <text id="34">
+                    <property name="x">5pt</property>
+                    <property name="y">770pt</property>
+                    <property name="width">574pt</property>
+                    <property name="height">15pt</property>
                     <property name="fontSize">5pt</property>
                     <property name="fontFamily">Arial</property>
-                    <property name="textAlign">right</property>
-                    <text>Cód. Baixa</text>
-                </label>
+                    <expression name="content">row["PIX_TEXTOQRCODE"]</expression>
+                </text>
 
-                <!-- Linha divisória intermediária (corte) -->
-                <line id="line_cut">
+                <!-- LINHA DIVISÓRIA (corte) -->
+                <line id="35">
                     <property name="x">2pt</property>
                     <property name="y">420pt</property>
                     <property name="width">573pt</property>
@@ -757,10 +486,10 @@
                     <property name="borderWidth">0.5pt</property>
                 </line>
 
-                <!-- ========== SEÇÃO 2: ARQUIVO DO BANCO ========== -->
+                <!-- SEÇÃO 2: ARQUIVO DO BANCO -->
 
-                <!-- Logo BB (lado esquerdo) -->
-                <image id="logobb2">
+                <!-- Logo BB (seção 2) -->
+                <image id="36">
                     <property name="x">7pt</property>
                     <property name="y">478pt</property>
                     <property name="width">20pt</property>
@@ -769,8 +498,8 @@
                     <expression name="imageSource">"D:/ISBRE/Ico/bb.png"</expression>
                 </image>
 
-                <!-- "Banco do Brasil" (esquerda, seção 2) -->
-                <label id="banco2">
+                <!-- Banco do Brasil (seção 2) -->
+                <text id="37">
                     <property name="x">32pt</property>
                     <property name="y">483pt</property>
                     <property name="width">111pt</property>
@@ -778,24 +507,11 @@
                     <property name="fontSize">12pt</property>
                     <property name="fontWeight">bold</property>
                     <property name="fontFamily">Arial</property>
-                    <text>Banco do Brasil</text>
-                </label>
+                    <text-property name="content">Banco do Brasil</text-property>
+                </text>
 
-                <!-- "001-9" (código seção 2) -->
-                <label id="codigo2">
-                    <property name="x">149pt</property>
-                    <property name="y">482pt</property>
-                    <property name="width">33pt</property>
-                    <property name="height">16pt</property>
-                    <property name="fontSize">10pt</property>
-                    <property name="fontWeight">bold</property>
-                    <property name="fontFamily">Arial</property>
-                    <property name="textAlign">center</property>
-                    <text>001-9</text>
-                </label>
-
-                <!-- LINHA DIGITÁVEL (Recibo 2 - maior) -->
-                <text-data id="linha_dig2">
+                <!-- LINHA DIGITÁVEL (Recibo 2 - grande) -->
+                <text id="38">
                     <property name="x">195pt</property>
                     <property name="y">484pt</property>
                     <property name="width">376pt</property>
@@ -804,106 +520,8 @@
                     <property name="fontFamily">Arial Black</property>
                     <property name="fontWeight">bold</property>
                     <property name="textAlign">right</property>
-                    <expression name="valueExpr">row["LINHA_DIGITAVEL"]</expression>
-                    <property name="contentType">html</property>
-                </text-data>
-
-                <!-- QR Code -->
-                <image id="qrcode">
-                    <property name="x">496pt</property>
-                    <property name="y">691pt</property>
-                    <property name="width">64pt</property>
-                    <property name="height">64pt</property>
-                    <property name="source">url</property>
-                    <expression name="imageSource">"https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=" + encodeURIComponent(row["PIX_TEXTOQRCODE"])</expression>
-                </image>
-
-                <!-- Pague esta cobrança com PIX -->
-                <label id="pix_label">
-                    <property name="x">5pt</property>
-                    <property name="y">755pt</property>
-                    <property name="width">150pt</property>
-                    <property name="height">10pt</property>
-                    <property name="fontSize">7pt</property>
-                    <property name="fontFamily">Arial</property>
-                    <property name="fontWeight">bold</property>
-                    <text>Pague esta cobrança com PIX</text>
-                </label>
-
-                <!-- PIX TEXT (QR Code chave) -->
-                <text-data id="pix_text">
-                    <property name="x">5pt</property>
-                    <property name="y">770pt</property>
-                    <property name="width">574pt</property>
-                    <property name="height">15pt</property>
-                    <property name="fontSize">5pt</property>
-                    <property name="fontFamily">Arial</property>
-                    <property name="textAlign">justified</property>
-                    <expression name="valueExpr">row["PIX_TEXTOQRCODE"]</expression>
-                    <property name="contentType">html</property>
-                </text-data>
-
-                <!-- Data de Vencimento label (QR) -->
-                <label id="data_venc_qr_label">
-                    <property name="x">384pt</property>
-                    <property name="y">692pt</property>
-                    <property name="width">83pt</property>
-                    <property name="height">10pt</property>
-                    <property name="fontSize">7pt</property>
-                    <property name="fontFamily">Arial</property>
-                    <property name="textAlign">center</property>
-                    <text>Data de Vencimento:</text>
-                </label>
-
-                <!-- Data de Vencimento value (QR) -->
-                <text-data id="data_venc_qr_val">
-                    <property name="x">384pt</property>
-                    <property name="y">705pt</property>
-                    <property name="width">83pt</property>
-                    <property name="height">12pt</property>
-                    <property name="fontSize">8pt</property>
-                    <property name="fontFamily">Arial</property>
-                    <property name="textAlign">center</property>
-                    <expression name="valueExpr">row["DATA_VENCIMENTO"]</expression>
-                    <property name="contentType">html</property>
-                </text-data>
-
-                <!-- Valor do Documento label (QR) -->
-                <label id="valor_qr_label">
-                    <property name="x">384pt</property>
-                    <property name="y">729pt</property>
-                    <property name="width">83pt</property>
-                    <property name="height">10pt</property>
-                    <property name="fontSize">7pt</property>
-                    <property name="fontFamily">Arial</property>
-                    <property name="textAlign">center</property>
-                    <text>Valor do Documento:</text>
-                </label>
-
-                <!-- Valor do Documento value (QR) -->
-                <text-data id="valor_qr_val">
-                    <property name="x">384pt</property>
-                    <property name="y">741pt</property>
-                    <property name="width">83pt</property>
-                    <property name="height">12pt</property>
-                    <property name="fontSize">8pt</property>
-                    <property name="fontFamily">Arial</property>
-                    <property name="textAlign">center</property>
-                    <expression name="valueExpr">row["VALOR"]</expression>
-                    <property name="contentType">html</property>
-                    <format-number pattern="¤ #,##0.00;¤ -#,##0.00"/>
-                </text-data>
-
-                <!-- Autenticação mecânica -->
-                <label id="autenticacao">
-                    <property name="x">514pt</property>
-                    <property name="y">364pt</property>
-                    <property name="width">61pt</property>
-                    <property name="height">8pt</property>
-                    <property name="fontSize">5pt</property>
-                    <property name="fontFamily">Arial</property>
-                    <text>Autenticação mecânica</text>
-                </label>
+                    <expression name="content">row["LINHA_DIGITAVEL"]</expression>
+                </text>
 
             </band>
         </section>
