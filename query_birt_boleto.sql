@@ -29,7 +29,9 @@ SELECT pes.nome,
        TO_CHAR(r.timestampcriacaosolicitacao, 'dd/mm/yyyy') data_solicitacao,
        p.codigo_conciliacao NrDocumento,
        to_char(r.timestampcriacaosolicitacao,'DD/MM/RRRR') data_processamento,
-       lib_bb_api.NossoNumero(p.codigo_conciliacao) nosso_numero
+       lib_bb_api.NossoNumero(p.codigo_conciliacao) nosso_numero,
+       'Banco do Brasil' banco_nome,
+       '001-9' codigo_banco
   FROM bb_cobranca_pf p, bb_cobranca_pf_registrado r, pessoa pes
  WHERE p.status = 'T'
    AND r.id_bb_cobranca_pf = p.id
