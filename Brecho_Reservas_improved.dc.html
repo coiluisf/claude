@@ -160,8 +160,80 @@ a:hover{ color:#7d4f42; text-decoration:underline; }
                   <textarea value="{{form.notes}}" onChange="{{onNotesChange}}" placeholder="Observações" rows="2" style="padding:13px 14px; border-radius:12px; border:1px solid rgba(160,120,100,.15); font-size:13.5px; font-family:'Manrope',sans-serif; background:#fff; resize:none; transition:all .2s ease; color:#1a1410;"></textarea>
                 </div>
 
-                <button onClick="{{submitReservation}}" style="width:100%; margin-top:18px; padding:16px; border:none; border-radius:12px; background:linear-gradient(135deg, #8b5a42 0%, #a0695a 100%); color:#fff; font-size:15px; font-weight:700; cursor:pointer; box-shadow:0 4px 12px rgba(128,84,72,.25); transition:all .3s ease; font-family:'Manrope',sans-serif;">Confirmar reserva</button>
+                <button onClick="{{proceedToCheckout}}" style="width:100%; margin-top:18px; padding:16px; border:none; border-radius:12px; background:linear-gradient(135deg, #8b5a42 0%, #a0695a 100%); color:#fff; font-size:15px; font-weight:700; cursor:pointer; box-shadow:0 4px 12px rgba(128,84,72,.25); transition:all .3s ease; font-family:'Manrope',sans-serif;">Prosseguir para pagamento</button>
                 <button onClick="{{closeReserveModal}}" style="width:100%; margin-top:10px; padding:13px; border:none; background:none; color:rgba(26,20,16,.55); font-size:13.5px; font-weight:600; cursor:pointer; transition:all .2s ease; font-family:'Manrope',sans-serif;">Cancelar</button>
+              </div>
+            </div>
+          </sc-if>
+
+          <sc-if value="{{showCheckoutModal}}" hint-placeholder-val="{{false}}">
+            <div style="position:absolute; inset:0; background:rgba(20,15,13,.55); display:flex; align-items:flex-end; z-index:50; animation:fadeIn .2s ease; backdrop-filter:blur(4px);">
+              <div style="width:100%; max-height:92%; overflow-y:auto; background:linear-gradient(135deg, #faf8f6 0%, #f4ece6 100%); border-radius:24px 24px 0 0; padding:20px 20px 26px; animation:sheetUp .3s cubic-bezier(0.34, 1.56, 0.64, 1); box-shadow:0 -8px 32px rgba(0,0,0,.12);">
+                <div style="width:40px; height:4px; background:rgba(160,120,100,.25); border-radius:99px; margin:0 auto 18px;"></div>
+
+                <div style="font-family:'Playfair Display',serif; font-size:20px; font-weight:700; color:#1a1410; margin-bottom:6px;">Confirmar pagamento</div>
+                <div style="font-size:13px; color:rgba(26,20,16,.6); margin-bottom:18px;">Depósito para garantir sua reserva</div>
+
+                <div style="background:#fff; border:1px solid rgba(160,120,100,.12); border-radius:14px; padding:16px; margin-bottom:16px; box-shadow:0 2px 8px rgba(0,0,0,.04);">
+                  <div style="display:flex; gap:12px; margin-bottom:16px;">
+                    <div style="width:56px; height:68px; border-radius:10px; background:linear-gradient(135deg, #f1e8e4 0%, #e9dcd6 100%); flex-shrink:0;"></div>
+                    <div style="flex:1;">
+                      <div style="font-size:13px; font-weight:700; color:#1a1410;">{{sp.name}}</div>
+                      <div style="font-size:11px; color:rgba(26,20,16,.6); margin-top:2px;">{{sp.brand}} · {{sp.size}}</div>
+                      <div style="font-family:'Playfair Display',serif; font-size:15px; font-weight:700; color:#a0695a; margin-top:6px;">{{sp.priceFmt}}</div>
+                    </div>
+                  </div>
+
+                  <div style="border-top:1px solid rgba(160,120,100,.08); padding-top:12px;">
+                    <div style="display:flex; justify-content:space-between; font-size:12px; margin-bottom:6px; color:#1a1410;">
+                      <span style="color:rgba(26,20,16,.65);">Valor total</span>
+                      <span style="font-weight:700;">{{checkout.totalPrice}}</span>
+                    </div>
+                    <div style="display:flex; justify-content:space-between; font-size:12px; margin-bottom:6px; color:#1a1410;">
+                      <span style="color:rgba(26,20,16,.65);">Depósito (20%)</span>
+                      <span style="font-weight:700;">{{checkout.depositPrice}}</span>
+                    </div>
+                    <div style="display:flex; justify-content:space-between; font-size:13px; padding-top:8px; border-top:1px solid rgba(160,120,100,.08); color:#1a1410;">
+                      <span style="font-weight:700;">A pagar agora</span>
+                      <span style="font-family:'Playfair Display',serif; font-size:16px; font-weight:700; color:#a0695a;">{{checkout.depositPrice}}</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div style="background:linear-gradient(135deg, rgba(160,120,100,.06) 0%, rgba(160,120,100,.03) 100%); border:1px solid rgba(160,120,100,.12); border-radius:12px; padding:12px 14px; margin-bottom:16px;">
+                  <div style="font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.08em; color:rgba(26,20,16,.65); margin-bottom:6px;">Método de pagamento</div>
+                  <div style="font-size:13px; font-weight:600; color:#1a1410;">💳 Cartão de crédito</div>
+                  <div style="font-size:11px; color:rgba(26,20,16,.6); margin-top:3px;">Mastercard • Visa • Elo</div>
+                </div>
+
+                <div style="margin-bottom:16px;">
+                  <label style="font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.08em; color:rgba(26,20,16,.65); display:block; margin-bottom:8px;">Número do cartão</label>
+                  <input value="{{checkout.cardNumber}}" onChange="{{onCardNumberChange}}" placeholder="0000 0000 0000 0000" maxlength="19" style="width:100%; padding:12px 14px; border-radius:10px; border:1px solid rgba(160,120,100,.15); font-size:13.5px; font-family:'Manrope',sans-serif; background:#fff; transition:all .2s ease; color:#1a1410;" />
+                </div>
+
+                <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:16px;">
+                  <div>
+                    <label style="font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.08em; color:rgba(26,20,16,.65); display:block; margin-bottom:8px;">Validade</label>
+                    <input value="{{checkout.cardExpiry}}" onChange="{{onCardExpiryChange}}" placeholder="MM/AA" maxlength="5" style="width:100%; padding:12px 14px; border-radius:10px; border:1px solid rgba(160,120,100,.15); font-size:13.5px; font-family:'Manrope',sans-serif; background:#fff; transition:all .2s ease; color:#1a1410;" />
+                  </div>
+                  <div>
+                    <label style="font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.08em; color:rgba(26,20,16,.65); display:block; margin-bottom:8px;">CVV</label>
+                    <input value="{{checkout.cardCvv}}" onChange="{{onCardCvvChange}}" placeholder="000" maxlength="3" style="width:100%; padding:12px 14px; border-radius:10px; border:1px solid rgba(160,120,100,.15); font-size:13.5px; font-family:'Manrope',sans-serif; background:#fff; transition:all .2s ease; color:#1a1410;" />
+                  </div>
+                </div>
+
+                <div style="background:linear-gradient(135deg, rgba(63,122,86,.08) 0%, rgba(63,122,86,.04) 100%); border:1px solid rgba(63,122,86,.15); border-radius:10px; padding:10px 12px; margin-bottom:18px;">
+                  <div style="display:flex; align-items:flex-start; gap:8px;">
+                    <div style="font-size:16px; margin-top:2px;">✓</div>
+                    <div>
+                      <div style="font-size:12px; font-weight:700; color:#3f7a56;">Transação segura</div>
+                      <div style="font-size:11px; color:rgba(63,122,86,.7); margin-top:2px;">Seus dados são criptografados</div>
+                    </div>
+                  </div>
+                </div>
+
+                <button onClick="{{processPayment}}" style="width:100%; padding:16px; border:none; border-radius:12px; background:linear-gradient(135deg, #3f7a56 0%, #4d8a65 100%); color:#fff; font-size:15px; font-weight:700; cursor:pointer; box-shadow:0 4px 12px rgba(63,122,86,.25); transition:all .3s ease; font-family:'Manrope',sans-serif; margin-bottom:10px;">Pagar {{checkout.depositPrice}}</button>
+                <button onClick="{{backToReserveForm}}" style="width:100%; padding:13px; border:none; background:none; color:rgba(26,20,16,.55); font-size:13.5px; font-weight:600; cursor:pointer; transition:all .2s ease; font-family:'Manrope',sans-serif;">Voltar</button>
               </div>
             </div>
           </sc-if>
@@ -497,8 +569,10 @@ class Component extends DCLogic {
     clientScreen: 'catalog',
     selectedProductId: null,
     showReserveModal: false,
+    showCheckoutModal: false,
     form: {name:'', whatsapp:'', email:'', city:'', state:'', notes:''},
     formErrors: {},
+    checkout: {cardNumber:'', cardExpiry:'', cardCvv:'', totalPrice:'', depositPrice:''},
     lastReservationId: null,
     reservations: buildSeedReservations(Date.now()),
     nextNumber: 155,
@@ -553,8 +627,78 @@ class Component extends DCLogic {
   openProduct(id){ this.setState({clientScreen:'product', selectedProductId:id}); }
   backToCatalog(){ this.setState({clientScreen:'catalog', selectedProductId:null}); }
   openReserveModal(){ this.setState({showReserveModal:true, formErrors:{}}); }
-  closeReserveModal(){ this.setState({showReserveModal:false}); }
+  closeReserveModal(){ this.setState({showReserveModal:false, showCheckoutModal:false, checkout:{cardNumber:'', cardExpiry:'', cardCvv:'', totalPrice:'', depositPrice:''}}); }
   setFormField(field, val){ this.setState(s=>({form:{...s.form, [field]:val}})); }
+
+  proceedToCheckout(){
+    const form = this.state.form;
+    const errors = {};
+    if(!form.name.trim()) errors.name = 'Informe o nome completo';
+    if(!form.whatsapp.trim()) errors.whatsapp = 'Informe o WhatsApp';
+    if(Object.keys(errors).length){ this.setState({formErrors:errors}); return; }
+    const pid = this.state.selectedProductId;
+    const product = PRODUCTS_SEED.find(p=>p.id===pid);
+    if(!product) return;
+    const totalPrice = product.price;
+    const depositPrice = Math.round(totalPrice * 0.2 * 100) / 100;
+    this.setState({
+      showCheckoutModal:true,
+      checkout:{
+        cardNumber:'',
+        cardExpiry:'',
+        cardCvv:'',
+        totalPrice: formatPrice(totalPrice),
+        depositPrice: formatPrice(depositPrice),
+        __totalNum: totalPrice,
+        __depositNum: depositPrice
+      }
+    });
+  }
+
+  backToReserveForm(){ this.setState({showCheckoutModal:false, checkout:{cardNumber:'', cardExpiry:'', cardCvv:'', totalPrice:'', depositPrice:''}}); }
+
+  setCheckoutField(field, val){ this.setState(s=>({checkout:{...s.checkout, [field]:val}})); }
+  onCardNumberChange(e){ let val = e.target.value.replace(/\D/g,''); val = val.replace(/(\d{4})/g, '$1 ').trim(); this.setCheckoutField('cardNumber', val); }
+  onCardExpiryChange(e){ let val = e.target.value.replace(/\D/g,''); if(val.length>=2) val = val.slice(0,2) + '/' + val.slice(2,4); this.setCheckoutField('cardExpiry', val); }
+  onCardCvvChange(e){ this.setCheckoutField('cardCvv', e.target.value.replace(/\D/g,'').slice(0,3)); }
+
+  processPayment(){
+    const checkout = this.state.checkout;
+    if(!checkout.cardNumber || checkout.cardNumber.replace(/\s/g,'').length!==16){
+      this.addToast('Número do cartão inválido');
+      return;
+    }
+    if(!checkout.cardExpiry || checkout.cardExpiry.length!==5){
+      this.addToast('Data de validade inválida');
+      return;
+    }
+    if(!checkout.cardCvv || checkout.cardCvv.length!==3){
+      this.addToast('CVV inválido');
+      return;
+    }
+    const form = this.state.form;
+    const now = Date.now();
+    const dur = DURATIONS[this.state.defaultDurationIndex].ms;
+    const number = this.state.nextNumber;
+    const id = 'RES-2026-'+String(number).padStart(6,'0');
+    const pid = this.state.selectedProductId;
+    const reservation = {
+      id, productId:pid, customerName:form.name.trim(), whatsapp:form.whatsapp.trim(), email:form.email.trim(), city:form.city.trim(), state:form.state, notes:form.notes.trim(),
+      createdAt:now, expiresAt:now+dur, status:'pagamento_confirmado', depositPaid:true, depositAmount:checkout.__depositNum,
+      history:[{ts:now, action:'Reserva criada', user:'Cliente'},{ts:now, action:'Depósito de 20% pago com sucesso', user:'Sistema'}]
+    };
+    this.setState(s=>({
+      reservations:[...s.reservations, reservation],
+      nextNumber:s.nextNumber+1,
+      showReserveModal:false,
+      showCheckoutModal:false,
+      clientScreen:'confirmation',
+      lastReservationId:id,
+      form:{name:'', whatsapp:'', email:'', city:'', state:'', notes:''},
+      checkout:{cardNumber:'', cardExpiry:'', cardCvv:'', totalPrice:'', depositPrice:''}
+    }));
+    this.addToast('Pagamento processado! Reserva confirmada.');
+  }
 
   submitReservation(){
     const form = this.state.form;
@@ -844,6 +988,7 @@ class Component extends DCLogic {
       openProduct: (id)=>this.openProduct(id), backToCatalog: ()=>this.backToCatalog(),
       openReserveModal: ()=>this.openReserveModal(), closeReserveModal: ()=>this.closeReserveModal(),
       showReserveModal: s.showReserveModal,
+      showCheckoutModal: s.showCheckoutModal,
       form: s.form, errors: s.formErrors, ufOptions,
       onNameChange: (e)=>this.setFormField('name', e.target.value),
       onWhatsappChange: (e)=>this.setFormField('whatsapp', e.target.value),
@@ -852,6 +997,13 @@ class Component extends DCLogic {
       onStateChange: (e)=>this.setFormField('state', e.target.value),
       onNotesChange: (e)=>this.setFormField('notes', e.target.value),
       submitReservation: ()=>this.submitReservation(),
+      proceedToCheckout: ()=>this.proceedToCheckout(),
+      checkout: s.checkout,
+      onCardNumberChange: (e)=>this.onCardNumberChange(e),
+      onCardExpiryChange: (e)=>this.onCardExpiryChange(e),
+      onCardCvvChange: (e)=>this.onCardCvvChange(e),
+      processPayment: ()=>this.processPayment(),
+      backToReserveForm: ()=>this.backToReserveForm(),
       conf, backToShop: ()=>this.backToShop(),
 
       role: s.role, onRoleChange: (e)=>this.setRole(e.target.value),
