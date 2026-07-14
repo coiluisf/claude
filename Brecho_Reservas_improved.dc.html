@@ -1,0 +1,879 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@500;600;700&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+@keyframes toastIn { from{opacity:0; transform:translateX(16px)} to{opacity:1; transform:translateX(0)} }
+@keyframes sheetUp { from{opacity:0; transform:translateY(24px)} to{opacity:1; transform:translateY(0)} }
+@keyframes fadeIn { from{opacity:0} to{opacity:1} }
+@keyframes popIn { from{opacity:0; transform:scale(.9)} to{opacity:1; transform:scale(1)} }
+@keyframes slideUp { from{opacity:0; transform:translateY(8px)} to{opacity:1; transform:translateY(0)} }
+@keyframes shimmer { from{background-position:100%} to{background-position:0} }
+body{ margin:0; background:linear-gradient(135deg, #faf8f6 0%, #f4ece6 100%); font-family:'Manrope',sans-serif; }
+a{ color:#a0695a; text-decoration:none; transition:all .2s ease; }
+a:hover{ color:#7d4f42; text-decoration:underline; }
+*{ box-sizing:border-box; }
+::-webkit-scrollbar{ width:8px; height:8px; }
+::-webkit-scrollbar-thumb{ background:rgba(128,84,72,.2); border-radius:8px; }
+::-webkit-scrollbar-track{ background:transparent; }
+</style>
+</helmet>
+<div style="min-height:100vh; background:linear-gradient(135deg, #faf8f6 0%, #f4ece6 100%); font-family:'Manrope',sans-serif; color:#1a1410;">
+
+  <div style="position:sticky; top:0; z-index:40; display:flex; align-items:center; justify-content:space-between; padding:16px 28px; background:rgba(255,255,255,.95); backdrop-filter:blur(10px); border-bottom:1px solid rgba(160,120,100,.12); flex-wrap:wrap; gap:10px; box-shadow:0 4px 12px rgba(0,0,0,.06);">
+    <div style="font-family:'Playfair Display',serif; font-size:24px; font-weight:700; background:linear-gradient(135deg, #8b5a42 0%, #a0695a 100%); -webkit-background-clip:text; -webkit-text-fill-color:transparent; background-clip:text; letter-spacing:.3px;">✨ Brechó Aurora</div>
+    <div style="display:flex; gap:6px; background:linear-gradient(135deg, #f8f4f0 0%, #ede8e3 100%); padding:6px; border-radius:999px; border:1px solid rgba(160,120,100,.15); box-shadow:0 2px 8px rgba(0,0,0,.04);">
+      <button onClick="{{setViewClient}}" style="{{clientBtnStyle}}">Vitrine (cliente)</button>
+      <button onClick="{{setViewAdmin}}" style="{{adminBtnStyle}}">Painel admin</button>
+    </div>
+  </div>
+
+  <div style="position:fixed; top:76px; right:20px; z-index:300; display:flex; flex-direction:column; gap:10px; max-width:320px;">
+    <sc-for list="{{toasts}}" as="t" hint-placeholder-count="0">
+      <div style="background:linear-gradient(135deg, #1a1410 0%, #2d2420 100%); color:#faf5f2; padding:13px 16px; border-radius:12px; font-size:13.5px; box-shadow:0 12px 32px rgba(0,0,0,.25); animation:toastIn .3s cubic-bezier(0.34, 1.56, 0.64, 1); border:1px solid rgba(255,255,255,.1);">{{t.msg}}</div>
+    </sc-for>
+  </div>
+
+  <sc-if value="{{isClientView}}" hint-placeholder-val="{{true}}">
+    <div style="display:flex; flex-direction:column; align-items:center; padding:40px 20px 80px; gap:14px;">
+      <x-import component-from-global-scope="IOSDevice" from="./ios-frame.jsx" title="Loja" hint-size="390px,844px">
+        <div style="position:relative; height:100%; width:100%; background:linear-gradient(135deg, #faf8f6 0%, #f4ece6 100%); overflow:hidden;">
+
+          <sc-if value="{{screenIsCatalog}}" hint-placeholder-val="{{true}}">
+            <div style="height:100%; overflow-y:auto; padding:22px 18px 40px;">
+              <div style="margin-bottom:20px;">
+                <div style="font-family:'Playfair Display',serif; font-size:28px; font-weight:700; color:#1a1410; letter-spacing:-.5px;">Brechó Aurora</div>
+                <div style="font-size:13px; color:rgba(26,20,16,.65); margin-top:4px; font-weight:500;">Peças únicas, escolhidas com carinho.</div>
+              </div>
+              <div style="display:grid; grid-template-columns:1fr 1fr; gap:13px;">
+                <sc-for list="{{catalogProducts}}" as="p" hint-placeholder-count="6">
+                  <div onClick="{{p.onOpen}}" style="background:#fff; border-radius:18px; overflow:hidden; cursor:pointer; border:1px solid rgba(160,120,100,.12); display:flex; flex-direction:column; transition:all .3s cubic-bezier(0.34, 1.56, 0.64, 1); box-shadow:0 2px 12px rgba(0,0,0,.06); position:relative;">
+                    <div style="position:relative; aspect-ratio:3/4; background:linear-gradient(135deg, #f1e8e4 0%, #e9dcd6 100%); display:flex; align-items:center; justify-content:center; padding:8px; overflow:hidden;">
+                      <div style="position:absolute; inset:0; background:linear-gradient(45deg, transparent 30%, rgba(255,255,255,.1) 50%, transparent 70%); animation:shimmer 2s infinite;"></div>
+                      <span style="font-family:monospace; font-size:10px; color:rgba(26,20,16,.45); text-align:center; font-weight:500;">{{p.photoLabel}}</span>
+                      <sc-if value="{{p.showBadge}}" hint-placeholder-val="{{false}}">
+                        <div style="position:absolute; top:10px; left:10px; padding:4px 10px; border-radius:999px; font-size:9.5px; font-weight:700; background:{{p.badgeBg}}; color:{{p.badgeFg}}; box-shadow:0 2px 6px rgba(0,0,0,.1); backdrop-filter:blur(8px);">{{p.badgeLabel}}</div>
+                      </sc-if>
+                    </div>
+                    <div style="padding:12px 13px 14px; display:flex; flex-direction:column; flex:1;">
+                      <div style="font-size:13px; font-weight:700; line-height:1.3; color:#1a1410;">{{p.name}}</div>
+                      <div style="font-size:11px; color:rgba(26,20,16,.6); margin-top:3px; font-weight:500;">{{p.brand}} · {{p.size}}</div>
+                      <div style="font-family:'Playfair Display',serif; font-size:15px; font-weight:700; color:#a0695a; margin-top:auto; padding-top:8px;">{{p.priceFmt}}</div>
+                    </div>
+                  </div>
+                </sc-for>
+              </div>
+            </div>
+          </sc-if>
+
+          <sc-if value="{{screenIsProduct}}" hint-placeholder-val="{{false}}">
+            <div style="height:100%; overflow-y:auto; padding:18px 18px 100px;">
+              <button onClick="{{backToCatalog}}" style="border:none; background:linear-gradient(135deg, rgba(160,120,100,.1) 0%, rgba(160,120,100,.05) 100%); color:#a0695a; font-size:13px; font-weight:600; cursor:pointer; padding:8px 12px; border-radius:10px; transition:all .2s ease; margin-bottom:16px;">← Voltar</button>
+              <div style="aspect-ratio:4/5; border-radius:18px; background:linear-gradient(135deg, #f1e8e4 0%, #e9dcd6 100%); display:flex; align-items:center; justify-content:center; margin:8px 0 16px; overflow:hidden; box-shadow:0 4px 16px rgba(0,0,0,.08); border:1px solid rgba(160,120,100,.12);">
+                <span style="font-family:monospace; font-size:11px; color:rgba(26,20,16,.45); font-weight:500;">{{sp.photoLabel}}</span>
+              </div>
+              <div style="display:inline-block; padding:5px 12px; border-radius:999px; font-size:11px; font-weight:700; background:{{p.badgeBg}}; color:{{p.badgeFg}}; margin-bottom:12px; box-shadow:0 2px 6px rgba(0,0,0,.1);">{{sp.badgeLabel}}</div>
+              <div style="font-family:'Playfair Display',serif; font-size:24px; font-weight:700; color:#1a1410; line-height:1.2;">{{sp.name}}</div>
+              <div style="font-family:'Playfair Display',serif; font-size:20px; font-weight:700; color:#a0695a; margin-top:8px;">{{sp.priceFmt}}</div>
+
+              <div style="margin-top:18px; background:#fff; border:1px solid rgba(160,120,100,.12); border-radius:16px; padding:12px 16px; box-shadow:0 2px 8px rgba(0,0,0,.04);">
+                <div style="display:flex; justify-content:space-between; padding:11px 0; border-bottom:1px solid rgba(160,120,100,.08); font-size:13px; color:#1a1410;"><span style="color:rgba(26,20,16,.65); font-weight:500;">Categoria</span><span style="font-weight:700;">{{sp.category}}</span></div>
+                <div style="display:flex; justify-content:space-between; padding:11px 0; border-bottom:1px solid rgba(160,120,100,.08); font-size:13px; color:#1a1410;"><span style="color:rgba(26,20,16,.65); font-weight:500;">Marca</span><span style="font-weight:700;">{{sp.brand}}</span></div>
+                <div style="display:flex; justify-content:space-between; padding:11px 0; border-bottom:1px solid rgba(160,120,100,.08); font-size:13px; color:#1a1410;"><span style="color:rgba(26,20,16,.65); font-weight:500;">Cor</span><span style="font-weight:700;">{{sp.color}}</span></div>
+                <div style="display:flex; justify-content:space-between; padding:11px 0; border-bottom:1px solid rgba(160,120,100,.08); font-size:13px; color:#1a1410;"><span style="color:rgba(26,20,16,.65); font-weight:500;">Tamanho</span><span style="font-weight:700;">{{sp.size}}</span></div>
+                <div style="display:flex; justify-content:space-between; padding:11px 0; border-bottom:1px solid rgba(160,120,100,.08); font-size:13px; color:#1a1410;"><span style="color:rgba(26,20,16,.65); font-weight:500;">Estado da peça</span><span style="font-weight:700;">{{sp.condition}}</span></div>
+                <div style="display:flex; justify-content:space-between; padding:11px 0; font-size:13px; color:#1a1410;"><span style="color:rgba(26,20,16,.65); font-weight:500;">Código interno</span><span style="font-weight:700; font-family:monospace; letter-spacing:.5px;">{{sp.code}}</span></div>
+              </div>
+
+              <div style="position:fixed; left:0; right:0; bottom:0; padding:16px 18px 22px; background:linear-gradient(180deg, rgba(250,248,246,0) 0%, linear-gradient(135deg, #faf8f6 0%, #f4ece6 100%) 30%);">
+                <sc-if value="{{sp.available}}" hint-placeholder-val="{{true}}">
+                  <button onClick="{{openReserveModal}}" style="width:100%; padding:16px; border:none; border-radius:14px; background:linear-gradient(135deg, #8b5a42 0%, #a0695a 100%); color:#fff; font-size:15.5px; font-weight:700; cursor:pointer; box-shadow:0 8px 24px rgba(128,84,72,.25); transition:all .3s ease; font-family:'Manrope',sans-serif;">Reservar peça</button>
+                </sc-if>
+                <sc-if value="{{sp.unavailable}}" hint-placeholder-val="{{false}}">
+                  <div style="width:100%; padding:16px; border-radius:14px; background:linear-gradient(135deg, #f5ede8 0%, #ede5df 100%); color:rgba(26,20,16,.65); font-size:14px; font-weight:600; text-align:center; border:1px solid rgba(160,120,100,.1);">{{sp.unavailableMsg}}</div>
+                </sc-if>
+              </div>
+            </div>
+          </sc-if>
+
+          <sc-if value="{{screenIsConfirmation}}" hint-placeholder-val="{{false}}">
+            <div style="height:100%; overflow-y:auto; padding:40px 22px 40px; display:flex; flex-direction:column; align-items:center; text-align:center;">
+              <div style="width:64px; height:64px; border-radius:999px; background:linear-gradient(135deg, #e7f3ea 0%, #d8ebe0 100%); color:#3f7a56; display:flex; align-items:center; justify-content:center; font-size:32px; margin-bottom:18px; box-shadow:0 4px 16px rgba(63,122,86,.15);">✓</div>
+              <div style="font-family:'Playfair Display',serif; font-size:21px; font-weight:700; color:#1a1410;">Reserva realizada!</div>
+              <div style="margin-top:4px; font-size:13px; color:rgba(26,20,16,.6);">Sua peça está garantida</div>
+              <div style="margin-top:20px; width:100%; background:#fff; border:1px solid rgba(160,120,100,.12); border-radius:16px; padding:18px; box-shadow:0 2px 8px rgba(0,0,0,.04);">
+                <div style="font-family:monospace; font-size:15px; font-weight:700; letter-spacing:.3px; color:#a0695a;">{{conf.code}}</div>
+                <div style="display:flex; justify-content:space-between; margin-top:14px; font-size:12.5px; color:rgba(26,20,16,.65);"><span style="font-weight:500;">Data</span><span style="font-weight:700; color:#1a1410;">{{conf.dateFmt}}</span></div>
+                <div style="display:flex; justify-content:space-between; margin-top:8px; font-size:12.5px; color:rgba(26,20,16,.65);"><span style="font-weight:500;">Horário</span><span style="font-weight:700; color:#1a1410;">{{conf.timeFmt}}</span></div>
+                <div style="display:flex; justify-content:space-between; margin-top:8px; font-size:12.5px; color:rgba(26,20,16,.65);"><span style="font-weight:500;">Tempo restante</span><span style="font-weight:700; color:#a0695a;">{{conf.remainingFmt}}</span></div>
+                <div style="display:flex; justify-content:center; margin-top:16px;">
+                  <div style="position:relative; width:64px; height:64px; background:#f8f4f0; border:1.5px solid rgba(160,120,100,.15); border-radius:8px;">
+                    <div style="position:absolute; top:5px; left:5px; width:12px; height:12px; border:2.5px solid #a0695a; border-radius:2px;"></div>
+                    <div style="position:absolute; top:5px; right:5px; width:12px; height:12px; border:2.5px solid #a0695a; border-radius:2px;"></div>
+                    <div style="position:absolute; bottom:5px; left:5px; width:12px; height:12px; border:2.5px solid #a0695a; border-radius:2px;"></div>
+                    <div style="position:absolute; bottom:6px; right:6px; width:10px; height:10px; background:#a0695a;"></div>
+                  </div>
+                </div>
+              </div>
+              <a href="{{conf.waLink}}" target="_blank" style="width:100%; margin-top:18px; padding:16px; border-radius:14px; background:linear-gradient(135deg, #3f7a56 0%, #4d8a65 100%); color:#fff; font-size:15px; font-weight:700; display:block; box-shadow:0 8px 24px rgba(63,122,86,.25); text-decoration:none; transition:all .3s ease; text-align:center;">Continuar no WhatsApp</a>
+              <button onClick="{{backToShop}}" style="width:100%; margin-top:10px; padding:14px; border-radius:14px; background:none; border:1.5px solid rgba(160,120,100,.2); color:#a0695a; font-size:14px; font-weight:700; cursor:pointer; transition:all .2s ease; font-family:'Manrope',sans-serif;">Voltar à loja</button>
+            </div>
+          </sc-if>
+
+          <sc-if value="{{showReserveModal}}" hint-placeholder-val="{{false}}">
+            <div style="position:absolute; inset:0; background:rgba(20,15,13,.55); display:flex; align-items:flex-end; z-index:50; animation:fadeIn .2s ease; backdrop-filter:blur(4px);">
+              <div style="width:100%; max-height:88%; overflow-y:auto; background:linear-gradient(135deg, #faf8f6 0%, #f4ece6 100%); border-radius:24px 24px 0 0; padding:20px 20px 26px; animation:sheetUp .3s cubic-bezier(0.34, 1.56, 0.64, 1); box-shadow:0 -8px 32px rgba(0,0,0,.12);">
+                <div style="width:40px; height:4px; background:rgba(160,120,100,.25); border-radius:99px; margin:0 auto 18px;"></div>
+                <div style="font-family:'Playfair Display',serif; font-size:20px; font-weight:700; color:#1a1410;">Reservar peça</div>
+                <div style="display:flex; gap:12px; margin-top:14px; background:#fff; border:1px solid rgba(160,120,100,.12); border-radius:14px; padding:12px; box-shadow:0 2px 8px rgba(0,0,0,.04);">
+                  <div style="width:56px; height:68px; border-radius:10px; background:linear-gradient(135deg, #f1e8e4 0%, #e9dcd6 100%); flex-shrink:0;"></div>
+                  <div>
+                    <div style="font-size:13px; font-weight:700; color:#1a1410;">{{sp.name}}</div>
+                    <div style="font-size:11px; color:rgba(26,20,16,.6); margin-top:2px;">{{sp.brand}} · {{sp.size}} · {{sp.code}}</div>
+                    <div style="font-family:'Playfair Display',serif; font-size:14px; font-weight:700; color:#a0695a; margin-top:6px;">{{sp.priceFmt}}</div>
+                  </div>
+                </div>
+
+                <div style="margin-top:18px; font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.1em; color:rgba(26,20,16,.55);">Seus dados</div>
+                <div style="margin-top:10px; display:flex; flex-direction:column; gap:10px;">
+                  <input value="{{form.name}}" onChange="{{onNameChange}}" placeholder="Nome completo" style="padding:13px 14px; border-radius:12px; border:1px solid rgba(160,120,100,.15); font-size:13.5px; font-family:'Manrope',sans-serif; background:#fff; transition:all .2s ease; color:#1a1410;" />
+                  <sc-if value="{{errors.name}}" hint-placeholder-val="{{false}}"><div style="color:#c85a5a; font-size:11.5px; margin-top:-6px; font-weight:600;">{{errors.name}}</div></sc-if>
+                  <input value="{{form.whatsapp}}" onChange="{{onWhatsappChange}}" placeholder="WhatsApp (com DDD)" style="padding:13px 14px; border-radius:12px; border:1px solid rgba(160,120,100,.15); font-size:13.5px; font-family:'Manrope',sans-serif; background:#fff; transition:all .2s ease; color:#1a1410;" />
+                  <sc-if value="{{errors.whatsapp}}" hint-placeholder-val="{{false}}"><div style="color:#c85a5a; font-size:11.5px; margin-top:-6px; font-weight:600;">{{errors.whatsapp}}</div></sc-if>
+                  <input value="{{form.email}}" onChange="{{onEmailChange}}" placeholder="E-mail (opcional)" style="padding:13px 14px; border-radius:12px; border:1px solid rgba(160,120,100,.15); font-size:13.5px; font-family:'Manrope',sans-serif; background:#fff; transition:all .2s ease; color:#1a1410;" />
+                  <div style="display:flex; gap:10px;">
+                    <input value="{{form.city}}" onChange="{{onCityChange}}" placeholder="Cidade" style="flex:1; padding:13px 14px; border-radius:12px; border:1px solid rgba(160,120,100,.15); font-size:13.5px; font-family:'Manrope',sans-serif; background:#fff; transition:all .2s ease; color:#1a1410;" />
+                    <select value="{{form.state}}" onChange="{{onStateChange}}" style="width:80px; padding:13px 8px; border-radius:12px; border:1px solid rgba(160,120,100,.15); font-size:13.5px; font-family:'Manrope',sans-serif; background:#fff; color:#1a1410; transition:all .2s ease;">
+                      <option value="">UF</option>
+                      <sc-for list="{{ufOptions}}" as="uf" hint-placeholder-count="27"><option value="{{uf}}">{{uf}}</option></sc-for>
+                    </select>
+                  </div>
+                  <textarea value="{{form.notes}}" onChange="{{onNotesChange}}" placeholder="Observações" rows="2" style="padding:13px 14px; border-radius:12px; border:1px solid rgba(160,120,100,.15); font-size:13.5px; font-family:'Manrope',sans-serif; background:#fff; resize:none; transition:all .2s ease; color:#1a1410;"></textarea>
+                </div>
+
+                <button onClick="{{submitReservation}}" style="width:100%; margin-top:18px; padding:16px; border:none; border-radius:12px; background:linear-gradient(135deg, #8b5a42 0%, #a0695a 100%); color:#fff; font-size:15px; font-weight:700; cursor:pointer; box-shadow:0 4px 12px rgba(128,84,72,.25); transition:all .3s ease; font-family:'Manrope',sans-serif;">Confirmar reserva</button>
+                <button onClick="{{closeReserveModal}}" style="width:100%; margin-top:10px; padding:13px; border:none; background:none; color:rgba(26,20,16,.55); font-size:13.5px; font-weight:600; cursor:pointer; transition:all .2s ease; font-family:'Manrope',sans-serif;">Cancelar</button>
+              </div>
+            </div>
+          </sc-if>
+
+        </div>
+      </x-import>
+      <div style="font-size:12px; color:rgba(26,20,16,.5);">Protótipo mobile-first · fluxo do cliente</div>
+    </div>
+  </sc-if>
+
+  <sc-if value="{{isAdminView}}" hint-placeholder-val="{{false}}">
+    <div style="max-width:1280px; margin:0 auto; padding:28px 24px 80px;">
+
+      <div style="display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:14px; margin-bottom:22px;">
+        <div>
+          <div style="font-family:'Playfair Display',serif; font-size:28px; font-weight:700; color:#1a1410;">Painel administrativo</div>
+          <div style="font-size:13px; color:rgba(26,20,16,.65); margin-top:4px; font-weight:500;">Controle de reservas em tempo real</div>
+        </div>
+        <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+          <label style="font-size:12px; color:rgba(26,20,16,.65); font-weight:600;">Perfil</label>
+          <select value="{{role}}" onChange="{{onRoleChange}}" style="padding:10px 12px; border-radius:10px; border:1px solid rgba(160,120,100,.15); font-size:13px; background:#fff; font-family:'Manrope',sans-serif; color:#1a1410; transition:all .2s ease;">
+            <option value="admin">Administrador</option>
+            <option value="funcionario">Funcionário</option>
+          </select>
+          <label style="font-size:12px; color:rgba(26,20,16,.65); font-weight:600;">Prazo padrão de reserva</label>
+          <select value="{{defaultDurationIndex}}" onChange="{{onDurationChange}}" disabled="{{durationDisabled}}" style="padding:10px 12px; border-radius:10px; border:1px solid rgba(160,120,100,.15); font-size:13px; background:#fff; font-family:'Manrope',sans-serif; color:#1a1410; transition:all .2s ease;">
+            <sc-for list="{{durationOptions}}" as="d" hint-placeholder-count="7"><option value="{{d.index}}">{{d.label}}</option></sc-for>
+          </select>
+        </div>
+      </div>
+
+      <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(190px,1fr)); gap:12px; margin-bottom:22px;">
+        <sc-for list="{{metricCards}}" as="m" hint-placeholder-count="9">
+          <div style="background:#fff; border:1px solid rgba(160,120,100,.12); border-radius:16px; padding:18px 18px; box-shadow:0 2px 8px rgba(0,0,0,.04); transition:all .2s ease;">
+            <div style="font-size:11.5px; font-weight:700; text-transform:uppercase; letter-spacing:.04em; color:rgba(26,20,16,.65);">{{m.label}}</div>
+            <div style="font-family:'Playfair Display',serif; font-size:26px; font-weight:700; margin-top:8px; color:#1a1410;">{{m.value}}</div>
+          </div>
+        </sc-for>
+      </div>
+
+      <div style="display:grid; grid-template-columns:repeat(2, 1fr); gap:14px; margin-bottom:22px;">
+        <div style="background:#fff; border:1px solid rgba(160,120,100,.12); border-radius:16px; padding:18px; box-shadow:0 2px 8px rgba(0,0,0,.04);">
+          <div style="font-size:13.5px; font-weight:700; margin-bottom:14px; color:#1a1410;">Reservas por dia (7 dias)</div>
+          <div style="display:flex; align-items:flex-end; gap:10px; height:120px;">
+            <sc-for list="{{chartDays}}" as="c" hint-placeholder-count="7">
+              <div style="flex:1; display:flex; flex-direction:column; align-items:center; gap:6px; height:100%; justify-content:flex-end;">
+                <div style="font-size:10.5px; color:rgba(26,20,16,.55); font-weight:700;">{{c.value}}</div>
+                <div style="width:100%; max-width:26px; background:linear-gradient(180deg, #a0695a 0%, #8b5a42 100%); border-radius:6px 6px 0 0; height:{{c.pct}}; transition:all .3s ease;"></div>
+                <div style="font-size:10px; color:rgba(26,20,16,.55);">{{c.label}}</div>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+        <div style="background:#fff; border:1px solid rgba(160,120,100,.12); border-radius:16px; padding:18px; box-shadow:0 2px 8px rgba(0,0,0,.04);">
+          <div style="font-size:13.5px; font-weight:700; margin-bottom:14px; color:#1a1410;">Horários com mais reservas</div>
+          <div style="display:flex; align-items:flex-end; gap:14px; height:120px;">
+            <sc-for list="{{chartHours}}" as="c" hint-placeholder-count="4">
+              <div style="flex:1; display:flex; flex-direction:column; align-items:center; gap:6px; height:100%; justify-content:flex-end;">
+                <div style="font-size:10.5px; color:rgba(26,20,16,.55); font-weight:700;">{{c.value}}</div>
+                <div style="width:100%; max-width:44px; background:linear-gradient(180deg, #1a1410 0%, #2d2420 100%); border-radius:6px 6px 0 0; height:{{c.pct}}; transition:all .3s ease;"></div>
+                <div style="font-size:10px; color:rgba(26,20,16,.55); text-align:center;">{{c.label}}</div>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+        <div style="background:#fff; border:1px solid rgba(160,120,100,.12); border-radius:16px; padding:18px; box-shadow:0 2px 8px rgba(0,0,0,.04);">
+          <div style="font-size:13.5px; font-weight:700; margin-bottom:12px; color:#1a1410;">Produtos mais reservados</div>
+          <div style="display:flex; flex-direction:column; gap:9px;">
+            <sc-for list="{{chartProducts}}" as="c" hint-placeholder-count="5">
+              <div>
+                <div style="display:flex; justify-content:space-between; font-size:11.5px; margin-bottom:3px; color:#1a1410;"><span>{{c.label}}</span><span style="font-weight:700;">{{c.value}}</span></div>
+                <div style="background:rgba(160,120,100,.08); border-radius:6px; height:8px;"><div style="background:linear-gradient(90deg, #a0695a, #8b5a42); border-radius:6px; height:8px; width:{{c.pct}}; transition:all .3s ease;"></div></div>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+        <div style="background:#fff; border:1px solid rgba(160,120,100,.12); border-radius:16px; padding:18px; box-shadow:0 2px 8px rgba(0,0,0,.04);">
+          <div style="font-size:13.5px; font-weight:700; margin-bottom:12px; color:#1a1410;">Categorias mais reservadas</div>
+          <div style="display:flex; flex-direction:column; gap:9px;">
+            <sc-for list="{{chartCategories}}" as="c" hint-placeholder-count="5">
+              <div>
+                <div style="display:flex; justify-content:space-between; font-size:11.5px; margin-bottom:3px; color:#1a1410;"><span>{{c.label}}</span><span style="font-weight:700;">{{c.value}}</span></div>
+                <div style="background:rgba(63,122,86,.08); border-radius:6px; height:8px;"><div style="background:linear-gradient(90deg, #3f7a56, #4d8a65); border-radius:6px; height:8px; width:{{c.pct}}; transition:all .3s ease;"></div></div>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+      </div>
+
+      <div style="background:#fff; border:1px solid rgba(160,120,100,.12); border-radius:16px; padding:18px; margin-bottom:14px; display:flex; gap:10px; flex-wrap:wrap; align-items:center; box-shadow:0 2px 8px rgba(0,0,0,.04);">
+        <input value="{{search}}" onChange="{{onSearchChange}}" placeholder="Buscar por nome, telefone, produto, código, cidade..." style="flex:1; min-width:220px; padding:12px 14px; border-radius:10px; border:1px solid rgba(160,120,100,.15); font-size:13px; font-family:'Manrope',sans-serif; background:#f8f4f0; transition:all .2s ease; color:#1a1410;" />
+        <select value="{{statusFilter}}" onChange="{{onStatusFilterChange}}" style="padding:12px 12px; border-radius:10px; border:1px solid rgba(160,120,100,.15); font-size:13px; background:#f8f4f0; font-family:'Manrope',sans-serif; color:#1a1410; transition:all .2s ease;">
+          <sc-for list="{{statusFilterOptions}}" as="o" hint-placeholder-count="8"><option value="{{o.value}}">{{o.label}}</option></sc-for>
+        </select>
+        <div style="display:flex; gap:4px; background:linear-gradient(135deg, #f8f4f0 0%, #ede8e3 100%); padding:4px; border-radius:10px; border:1px solid rgba(160,120,100,.1);">
+          <sc-for list="{{dateFilterOptions}}" as="d" hint-placeholder-count="5">
+            <button onClick="{{d.onClick}}" style="{{d.style}}">{{d.label}}</button>
+          </sc-for>
+        </div>
+        <button onClick="{{onExport}}" style="padding:10px 14px; border-radius:10px; border:1px solid rgba(160,120,100,.15); background:#f8f4f0; font-size:12.5px; font-weight:600; cursor:pointer; color:#1a1410; transition:all .2s ease;">Exportar Excel</button>
+        <button onClick="{{onExport}}" style="padding:10px 14px; border-radius:10px; border:1px solid rgba(160,120,100,.15); background:#f8f4f0; font-size:12.5px; font-weight:600; cursor:pointer; color:#1a1410; transition:all .2s ease;">Exportar PDF</button>
+      </div>
+
+      <div style="background:#fff; border:1px solid rgba(160,120,100,.12); border-radius:16px; overflow:hidden; box-shadow:0 2px 8px rgba(0,0,0,.04);">
+        <div style="overflow-x:auto;">
+          <table style="width:100%; border-collapse:collapse; font-size:12.5px; min-width:1100px;">
+            <thead>
+              <tr style="background:linear-gradient(135deg, #f8f4f0 0%, #ede8e3 100%); text-align:left; border-bottom:1px solid rgba(160,120,100,.12);">
+                <th style="padding:14px; font-weight:700; color:rgba(26,20,16,.65); font-size:11px; text-transform:uppercase; letter-spacing:.05em;">Número</th>
+                <th style="padding:14px; font-weight:700; color:rgba(26,20,16,.65); font-size:11px; text-transform:uppercase; letter-spacing:.05em;">Cliente</th>
+                <th style="padding:14px; font-weight:700; color:rgba(26,20,16,.65); font-size:11px; text-transform:uppercase; letter-spacing:.05em;">Produto</th>
+                <th style="padding:14px; font-weight:700; color:rgba(26,20,16,.65); font-size:11px; text-transform:uppercase; letter-spacing:.05em;">Código</th>
+                <th style="padding:14px; font-weight:700; color:rgba(26,20,16,.65); font-size:11px; text-transform:uppercase; letter-spacing:.05em;">Telefone</th>
+                <th style="padding:14px; font-weight:700; color:rgba(26,20,16,.65); font-size:11px; text-transform:uppercase; letter-spacing:.05em;">Cidade</th>
+                <th style="padding:14px; font-weight:700; color:rgba(26,20,16,.65); font-size:11px; text-transform:uppercase; letter-spacing:.05em;">Data/Hora</th>
+                <th style="padding:14px; font-weight:700; color:rgba(26,20,16,.65); font-size:11px; text-transform:uppercase; letter-spacing:.05em;">Restante</th>
+                <th style="padding:14px; font-weight:700; color:rgba(26,20,16,.65); font-size:11px; text-transform:uppercase; letter-spacing:.05em;">Status</th>
+                <th style="padding:14px; font-weight:700; color:rgba(26,20,16,.65); font-size:11px; text-transform:uppercase; letter-spacing:.05em;">Valor</th>
+                <th style="padding:14px; font-weight:700; color:rgba(26,20,16,.65); font-size:11px; text-transform:uppercase; letter-spacing:.05em;">Ações</th>
+              </tr>
+            </thead>
+            <tbody>
+              <sc-for list="{{tableRows}}" as="r" hint-placeholder-count="6">
+                <tr style="border-top:1px solid rgba(160,120,100,.08); transition:all .2s ease;">
+                  <td style="padding:12px 14px; font-family:monospace; font-weight:700; color:#1a1410;">{{r.id}}</td>
+                  <td style="padding:12px 14px; font-weight:700; color:#1a1410;">{{r.customerName}}</td>
+                  <td style="padding:12px 14px; color:#1a1410;">{{r.productName}}</td>
+                  <td style="padding:12px 14px; font-family:monospace; color:#1a1410;">{{r.code}}</td>
+                  <td style="padding:12px 14px; color:#1a1410;">{{r.whatsapp}}</td>
+                  <td style="padding:12px 14px; color:#1a1410;">{{r.city}}/{{r.state}}</td>
+                  <td style="padding:12px 14px; white-space:nowrap; color:#1a1410;">{{r.dateFmt}} · {{r.timeFmt}}</td>
+                  <td style="padding:12px 14px; font-weight:700; color:{{r.remainingColor}};"><span style="background:rgba(160,120,100,.08); padding:4px 8px; border-radius:6px;">{{r.remainingFmt}}</span></td>
+                  <td style="padding:12px 14px;"><span style="padding:5px 12px; border-radius:999px; font-size:11px; font-weight:700; background:{{r.statusBg}}; color:{{r.statusFg}};">{{r.statusLabel}}</span></td>
+                  <td style="padding:12px 14px; font-weight:700; color:#1a1410;">{{r.valueFmt}}</td>
+                  <td style="padding:12px 14px;">
+                    <div style="display:flex; gap:5px; flex-wrap:wrap;">
+                      <button onClick="{{r.onView}}" title="Visualizar" style="padding:6px 10px; border-radius:8px; border:1px solid rgba(160,120,100,.15); background:#f8f4f0; font-size:11px; cursor:pointer; font-weight:600; color:#1a1410; transition:all .2s ease;">Ver</button>
+                      <button onClick="{{r.onEdit}}" title="Editar" style="padding:6px 10px; border-radius:8px; border:1px solid rgba(160,120,100,.15); background:#f8f4f0; font-size:11px; cursor:pointer; font-weight:600; color:#1a1410; transition:all .2s ease;">Editar</button>
+                      <button onClick="{{r.onConfirm}}" disabled="{{r.confirmDisabled}}" title="Confirmar" style="padding:6px 10px; border-radius:8px; border:1px solid rgba(63,122,86,.3); background:rgba(63,122,86,.1); color:#3f7a56; font-size:11px; cursor:pointer; opacity:{{r.confirmOpacity}}; font-weight:600; transition:all .2s ease;">Confirmar</button>
+                      <button onClick="{{r.onSold}}" disabled="{{r.soldDisabled}}" title="Marcar vendido" style="padding:6px 10px; border-radius:8px; border:1px solid rgba(160,120,100,.2); background:#f8f4f0; font-size:11px; cursor:pointer; opacity:{{r.soldOpacity}}; font-weight:600; color:#1a1410; transition:all .2s ease;">Vendido</button>
+                      <button onClick="{{r.onWhatsapp}}" title="Enviar WhatsApp" style="padding:6px 10px; border-radius:8px; border:1px solid rgba(160,120,100,.15); background:#f8f4f0; font-size:11px; cursor:pointer; font-weight:600; color:#1a1410; transition:all .2s ease;">WhatsApp</button>
+                      <button onClick="{{r.onCancel}}" disabled="{{r.cancelDisabled}}" title="Cancelar" style="padding:6px 10px; border-radius:8px; border:1px solid rgba(200,90,90,.3); background:rgba(200,90,90,.1); color:#c85a5a; font-size:11px; cursor:pointer; opacity:{{r.cancelOpacity}}; font-weight:600; transition:all .2s ease;">Cancelar</button>
+                      <button onClick="{{r.onDelete}}" disabled="{{r.deleteDisabled}}" title="Excluir" style="padding:6px 10px; border-radius:8px; border:1px solid rgba(160,120,100,.15); background:#f8f4f0; color:rgba(26,20,16,.6); font-size:11px; cursor:pointer; opacity:{{r.deleteOpacity}}; font-weight:600; transition:all .2s ease;">Excluir</button>
+                    </div>
+                  </td>
+                </tr>
+              </sc-for>
+            </tbody>
+          </table>
+        </div>
+        <sc-if value="{{tableEmpty}}" hint-placeholder-val="{{false}}">
+          <div style="padding:40px; text-align:center; color:rgba(26,20,16,.5); font-size:13px;">Nenhuma reserva encontrada para os filtros aplicados.</div>
+        </sc-if>
+      </div>
+    </div>
+  </sc-if>
+
+  <sc-if value="{{detail}}" hint-placeholder-val="{{false}}">
+    <div style="position:fixed; inset:0; background:rgba(20,15,13,.6); z-index:100; display:flex; justify-content:flex-end; animation:fadeIn .2s ease; backdrop-filter:blur(4px);">
+      <div style="width:min(460px,100%); height:100%; background:linear-gradient(135deg, #faf8f6 0%, #f4ece6 100%); overflow-y:auto; padding:26px; box-shadow:-12px 0 40px rgba(0,0,0,.15);">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:18px;">
+          <div style="font-family:'Playfair Display',serif; font-size:20px; font-weight:700; color:#1a1410;">Reserva {{detail.id}}</div>
+          <button onClick="{{closeDetail}}" style="border:none; background:linear-gradient(135deg, #f8f4f0 0%, #ede8e3 100%); border-radius:999px; width:36px; height:36px; font-size:16px; cursor:pointer; color:#1a1410; display:flex; align-items:center; justify-content:center; transition:all .2s ease;">✕</button>
+        </div>
+        <span style="padding:5px 12px; border-radius:999px; font-size:11.5px; font-weight:700; background:{{detail.statusBg}}; color:{{detail.statusFg}}; display:inline-block;">{{detail.statusLabel}}</span>
+
+        <div style="margin-top:16px; background:#fff; border:1px solid rgba(160,120,100,.12); border-radius:14px; padding:16px; box-shadow:0 2px 8px rgba(0,0,0,.04);">
+          <div style="font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:.05em; color:rgba(26,20,16,.65); margin-bottom:10px;">Produto</div>
+          <div style="display:flex; gap:12px;">
+            <div style="width:64px; height:78px; border-radius:10px; background:linear-gradient(135deg, #f1e8e4 0%, #e9dcd6 100%); flex-shrink:0;"></div>
+            <div>
+              <div style="font-weight:700; font-size:13.5px; color:#1a1410;">{{detail.productName}}</div>
+              <div style="font-size:11.5px; color:rgba(26,20,16,.6); margin-top:3px;">{{detail.productBrand}} · {{detail.productCode}}</div>
+              <div style="font-family:'Playfair Display',serif; font-weight:700; color:#a0695a; margin-top:6px;">{{detail.valueFmt}}</div>
+            </div>
+          </div>
+        </div>
+
+        <div style="margin-top:12px; background:#fff; border:1px solid rgba(160,120,100,.12); border-radius:14px; padding:16px; box-shadow:0 2px 8px rgba(0,0,0,.04);">
+          <div style="font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:.05em; color:rgba(26,20,16,.65); margin-bottom:10px;">Cliente</div>
+          <div style="font-size:13px; display:flex; flex-direction:column; gap:6px; color:#1a1410;">
+            <div><span style="color:rgba(26,20,16,.65);">Nome: </span><b>{{detail.customerName}}</b></div>
+            <div><span style="color:rgba(26,20,16,.65);">WhatsApp: </span><b>{{detail.whatsapp}}</b></div>
+            <div><span style="color:rgba(26,20,16,.65);">E-mail: </span><b>{{detail.email}}</b></div>
+            <div><span style="color:rgba(26,20,16,.65);">Cidade: </span><b>{{detail.city}}/{{detail.state}}</b></div>
+            <div><span style="color:rgba(26,20,16,.65);">Observações: </span><b>{{detail.notes}}</b></div>
+          </div>
+        </div>
+
+        <div style="margin-top:12px; background:#fff; border:1px solid rgba(160,120,100,.12); border-radius:14px; padding:16px; box-shadow:0 2px 8px rgba(0,0,0,.04);">
+          <div style="display:flex; justify-content:space-between; font-size:13px; color:#1a1410;"><span style="color:rgba(26,20,16,.65);">Criada em</span><b>{{detail.createdFmt}}</b></div>
+          <div style="display:flex; justify-content:space-between; font-size:13px; margin-top:8px; color:#1a1410;"><span style="color:rgba(26,20,16,.65);">Última atualização</span><b>{{detail.updatedFmt}}</b></div>
+          <div style="display:flex; justify-content:space-between; font-size:13px; margin-top:8px; color:#1a1410;"><span style="color:rgba(26,20,16,.65);">Tempo restante</span><b style="color:#a0695a;">{{detail.remainingFmt}}</b></div>
+        </div>
+
+        <div style="margin-top:12px; background:#fff; border:1px solid rgba(160,120,100,.12); border-radius:14px; padding:16px; box-shadow:0 2px 8px rgba(0,0,0,.04);">
+          <div style="font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:.05em; color:rgba(26,20,16,.65); margin-bottom:10px;">Histórico</div>
+          <div style="display:flex; flex-direction:column; gap:10px;">
+            <sc-for list="{{detail.history}}" as="h" hint-placeholder-count="3">
+              <div style="display:flex; gap:10px; font-size:12.5px; color:#1a1410;">
+                <div style="width:7px; height:7px; border-radius:999px; background:#a0695a; margin-top:5px; flex-shrink:0;"></div>
+                <div><div style="font-weight:600;">{{h.action}}</div><div style="color:rgba(26,20,16,.6); font-size:11px; margin-top:1px;">{{h.when}} · {{h.user}}</div></div>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+      </div>
+    </div>
+  </sc-if>
+
+  <sc-if value="{{editModal}}" hint-placeholder-val="{{false}}">
+    <div style="position:fixed; inset:0; background:rgba(20,15,13,.6); z-index:110; display:flex; align-items:center; justify-content:center; animation:fadeIn .2s ease; backdrop-filter:blur(4px);">
+      <div style="width:min(420px,90%); background:linear-gradient(135deg, #faf8f6 0%, #f4ece6 100%); border-radius:18px; padding:24px; animation:popIn .3s cubic-bezier(0.34, 1.56, 0.64, 1); box-shadow:0 20px 60px rgba(0,0,0,.15); border:1px solid rgba(160,120,100,.12);">
+        <div style="font-family:'Playfair Display',serif; font-size:20px; font-weight:700; margin-bottom:16px; color:#1a1410;">Editar reserva {{editModal.id}}</div>
+        <label style="font-size:12px; font-weight:700; color:rgba(26,20,16,.65);">Status</label>
+        <select value="{{editModal.status}}" onChange="{{onEditStatusChange}}" style="width:100%; margin-top:6px; padding:12px 12px; border-radius:10px; border:1px solid rgba(160,120,100,.15); font-size:13px; background:#fff; font-family:'Manrope',sans-serif; color:#1a1410; transition:all .2s ease;">
+          <sc-for list="{{editStatusOptions}}" as="o" hint-placeholder-count="7"><option value="{{o.value}}">{{o.label}}</option></sc-for>
+        </select>
+        <label style="font-size:12px; font-weight:700; color:rgba(26,20,16,.65); display:block; margin-top:14px;">Nova duração (a partir de agora)</label>
+        <select value="{{editModal.durationIndex}}" onChange="{{onEditDurationChange}}" style="width:100%; margin-top:6px; padding:12px 12px; border-radius:10px; border:1px solid rgba(160,120,100,.15); font-size:13px; background:#fff; font-family:'Manrope',sans-serif; color:#1a1410; transition:all .2s ease;">
+          <sc-for list="{{durationOptions}}" as="d" hint-placeholder-count="7"><option value="{{d.index}}">{{d.label}}</option></sc-for>
+        </select>
+        <label style="font-size:12px; font-weight:700; color:rgba(26,20,16,.65); display:block; margin-top:14px;">Observações</label>
+        <textarea value="{{editModal.notes}}" onChange="{{onEditNotesChange}}" rows="3" style="width:100%; margin-top:6px; padding:12px 12px; border-radius:10px; border:1px solid rgba(160,120,100,.15); font-size:13px; font-family:'Manrope',sans-serif; background:#fff; resize:none; color:#1a1410; transition:all .2s ease;"></textarea>
+        <div style="display:flex; gap:10px; margin-top:18px;">
+          <button onClick="{{closeEdit}}" style="flex:1; padding:12px; border-radius:11px; border:1px solid rgba(160,120,100,.15); background:#fff; font-size:13.5px; font-weight:600; cursor:pointer; color:#1a1410; transition:all .2s ease; font-family:'Manrope',sans-serif;">Cancelar</button>
+          <button onClick="{{saveEdit}}" style="flex:1; padding:12px; border-radius:11px; border:none; background:linear-gradient(135deg, #8b5a42 0%, #a0695a 100%); color:#fff; font-size:13.5px; font-weight:700; cursor:pointer; transition:all .3s ease; font-family:'Manrope',sans-serif;">Salvar</button>
+        </div>
+      </div>
+    </div>
+  </sc-if>
+
+  <sc-if value="{{confirmModal}}" hint-placeholder-val="{{false}}">
+    <div style="position:fixed; inset:0; background:rgba(20,15,13,.6); z-index:120; display:flex; align-items:center; justify-content:center; animation:fadeIn .2s ease; backdrop-filter:blur(4px);">
+      <div style="width:min(380px,90%); background:linear-gradient(135deg, #faf8f6 0%, #f4ece6 100%); border-radius:18px; padding:26px; text-align:center; animation:popIn .3s cubic-bezier(0.34, 1.56, 0.64, 1); box-shadow:0 20px 60px rgba(0,0,0,.15); border:1px solid rgba(160,120,100,.12);">
+        <div style="font-family:'Playfair Display',serif; font-size:19px; font-weight:700; color:#1a1410;">{{confirmModal.title}}</div>
+        <div style="font-size:14px; color:rgba(26,20,16,.65); margin-top:8px;">{{confirmModal.message}}</div>
+        <div style="display:flex; gap:10px; margin-top:20px;">
+          <button onClick="{{cancelConfirm}}" style="flex:1; padding:12px; border-radius:11px; border:1px solid rgba(160,120,100,.15); background:#fff; font-size:13.5px; font-weight:600; cursor:pointer; color:#1a1410; transition:all .2s ease; font-family:'Manrope',sans-serif;">Voltar</button>
+          <button onClick="{{runConfirm}}" style="flex:1; padding:12px; border-radius:11px; border:none; background:linear-gradient(135deg, #c85a5a 0%, #d46a6a 100%); color:#fff; font-size:13.5px; font-weight:700; cursor:pointer; transition:all .3s ease; font-family:'Manrope',sans-serif;">{{confirmModal.confirmLabel}}</button>
+        </div>
+      </div>
+    </div>
+  </sc-if>
+
+</div>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script>
+const DURATIONS = [
+  {label:'30 minutos', ms:30*60000},
+  {label:'1 hora', ms:3600000},
+  {label:'6 horas', ms:6*3600000},
+  {label:'12 horas', ms:12*3600000},
+  {label:'24 horas', ms:24*3600000},
+  {label:'48 horas', ms:48*3600000},
+  {label:'72 horas', ms:72*3600000}
+];
+
+const STATUS_META = {
+  disponivel:{label:'Disponível', bg:'#e7f3ea', fg:'#3f7a56'},
+  reservada:{label:'Reservada', bg:'#e3ecf7', fg:'#2f5789'},
+  pagamento_pendente:{label:'Pagamento pendente', bg:'#faf1d2', fg:'#8a6a12'},
+  confirmada:{label:'Confirmada', bg:'#fbe6d1', fg:'#a2591a'},
+  vendida:{label:'Vendida', bg:'#e4efe4', fg:'#2e6b3e'},
+  expirada:{label:'Expirada', bg:'#ece9e5', fg:'#5d5349'},
+  cancelada:{label:'Cancelada', bg:'#f8e2e2', fg:'#c85a5a'}
+};
+
+const UF_LIST = ['AC','AL','AP','AM','BA','CE','DF','ES','GO','MA','MT','MS','MG','PA','PB','PR','PE','PI','RJ','RN','RS','RO','RR','SC','SP','SE','TO'];
+
+const PRODUCTS_SEED = [
+  {id:'p1', name:'Vestido Floral Midi', category:'Vestidos', brand:'Studio Alma', color:'Verde oliva', size:'M', condition:'Seminovo', price:189, code:'VF-102', photoLabel:'vestido floral midi'},
+  {id:'p2', name:'Blazer Alfaiataria', category:'Casacos', brand:'Casa Reto', color:'Bege', size:'40', condition:'Novo com etiqueta', price:259, code:'BA-045', photoLabel:'blazer alfaiataria'},
+  {id:'p3', name:'Calça Wide Leg Jeans', category:'Calças', brand:'Nó Atelier', color:'Azul claro', size:'38', condition:'Usado - bom estado', price:149, code:'CW-078', photoLabel:'calça wide leg'},
+  {id:'p4', name:'Blusa de Seda', category:'Blusas', brand:'Studio Alma', color:'Off-white', size:'P', condition:'Seminovo', price:99, code:'BS-019', photoLabel:'blusa de seda'},
+  {id:'p5', name:'Saia Midi Plissada', category:'Saias', brand:'Aurora Vintage', color:'Terracota', size:'M', condition:'Seminovo', price:119, code:'SM-033', photoLabel:'saia midi plissada'},
+  {id:'p6', name:'Casaco de Lã', category:'Casacos', brand:'Terra Co.', color:'Camel', size:'42', condition:'Usado - bom estado', price:219, code:'CL-061', photoLabel:'casaco de lã'},
+  {id:'p7', name:'Vestido Longo Festa', category:'Vestidos', brand:'Aurora Vintage', color:'Vinho', size:'P', condition:'Novo com etiqueta', price:349, code:'VL-091', photoLabel:'vestido longo de festa'},
+  {id:'p8', name:'Bolsa Estruturada', category:'Acessórios', brand:'Casa Reto', color:'Preto', size:'Único', condition:'Seminovo', price:179, code:'BE-014', photoLabel:'bolsa estruturada'},
+  {id:'p9', name:'Cropped Tricot', category:'Blusas', brand:'Nó Atelier', color:'Rosa antigo', size:'P', condition:'Seminovo', price:79, code:'CT-027', photoLabel:'cropped tricot'},
+  {id:'p10', name:'Calça Alfaiataria', category:'Calças', brand:'Studio Alma', color:'Preto', size:'38', condition:'Novo com etiqueta', price:169, code:'CA-052', photoLabel:'calça alfaiataria'}
+];
+
+function buildSeedReservations(now){
+  const H = 3600000, D = 86400000;
+  return [
+    {id:'RES-2026-000154', productId:'p1', customerName:'Maria Oliveira', whatsapp:'(11) 98888-1234', email:'maria.oliveira@email.com', city:'São Paulo', state:'SP', notes:'Prefere retirar pessoalmente.', createdAt: now-2*H, expiresAt: now-2*H+24*H, status:'reservada', history:[{ts:now-2*H, action:'Reserva criada', user:'Cliente'}]},
+    {id:'RES-2026-000153', productId:'p5', customerName:'Camila Souza', whatsapp:'(21) 97777-2345', email:'', city:'Rio de Janeiro', state:'RJ', notes:'', createdAt: now-5*H, expiresAt: now-5*H+12*H, status:'pagamento_pendente', history:[{ts:now-5*H, action:'Reserva criada', user:'Cliente'},{ts:now-4*H, action:'Status alterado para Pagamento pendente', user:'Admin'}]},
+    {id:'RES-2026-000152', productId:'p10', customerName:'Fernanda Lima', whatsapp:'(31) 96666-3456', email:'fernanda.lima@email.com', city:'Belo Horizonte', state:'MG', notes:'Combinar entrega via motoboy.', createdAt: now-1*D, expiresAt: now-1*D+72*H, status:'confirmada', confirmedAt: now-1*D+3*H, history:[{ts:now-1*D, action:'Reserva criada', user:'Cliente'},{ts:now-1*D+3*H, action:'Status alterado para Confirmada', user:'Admin'}]},
+    {id:'RES-2026-000151', productId:'p4', customerName:'Juliana Prado', whatsapp:'(41) 95555-4567', email:'', city:'Curitiba', state:'PR', notes:'', createdAt: now-3*D, expiresAt: now-3*D+24*H, status:'vendida', confirmedAt: now-3*D+5*H, history:[{ts:now-3*D, action:'Reserva criada', user:'Cliente'},{ts:now-3*D+5*H, action:'Status alterado para Confirmada', user:'Admin'},{ts:now-3*D+30*H, action:'Produto marcado como vendido', user:'Admin'}]},
+    {id:'RES-2026-000150', productId:'p3', customerName:'Beatriz Nunes', whatsapp:'(51) 94444-5678', email:'', city:'Porto Alegre', state:'RS', notes:'', createdAt: now-5*D, expiresAt: now-5*D+24*H, status:'expirada', history:[{ts:now-5*D, action:'Reserva criada', user:'Cliente'},{ts:now-5*D+24*H, action:'Reserva expirada automaticamente', user:'Sistema'}]},
+    {id:'RES-2026-000149', productId:'p6', customerName:'Larissa Costa', whatsapp:'(61) 93333-6789', email:'', city:'Brasília', state:'DF', notes:'Desistiu da compra.', createdAt: now-4*D, expiresAt: now-4*D+48*H, status:'cancelada', history:[{ts:now-4*D, action:'Reserva criada', user:'Cliente'},{ts:now-4*D+2*H, action:'Reserva cancelada', user:'Admin'}]},
+    {id:'RES-2026-000148', productId:'p8', customerName:'Patrícia Alves', whatsapp:'(71) 92222-7890', email:'patricia.alves@email.com', city:'Salvador', state:'BA', notes:'', createdAt: now-6*D, expiresAt: now-6*D+24*H, status:'vendida', confirmedAt: now-6*D+8*H, history:[{ts:now-6*D, action:'Reserva criada', user:'Cliente'},{ts:now-6*D+8*H, action:'Status alterado para Confirmada', user:'Admin'},{ts:now-6*D+20*H, action:'Produto marcado como vendido', user:'Admin'}]},
+    {id:'RES-2026-000147', productId:'p2', customerName:'Renata Dias', whatsapp:'(81) 91111-8901', email:'', city:'Recife', state:'PE', notes:'', createdAt: now-7*D, expiresAt: now-7*D+24*H, status:'expirada', history:[{ts:now-7*D, action:'Reserva criada', user:'Cliente'},{ts:now-7*D+24*H, action:'Reserva expirada automaticamente', user:'Sistema'}]},
+    {id:'RES-2026-000146', productId:'p9', customerName:'Aline Barros', whatsapp:'(85) 90000-9012', email:'', city:'Fortaleza', state:'CE', notes:'', createdAt: now-8*D, expiresAt: now-8*D+24*H, status:'cancelada', history:[{ts:now-8*D, action:'Reserva criada', user:'Cliente'},{ts:now-8*D+1*H, action:'Reserva cancelada', user:'Cliente'}]}
+  ];
+}
+
+function buildMessage(res, product){
+  const name = product ? product.name : 'Produto';
+  const code = product ? product.code : '';
+  switch(res.status){
+    case 'confirmada':
+      return 'Olá '+res.customerName+'! Sua reserva '+res.id+' do produto '+name+' foi confirmada. Aguardamos a finalização da compra. Obrigado!';
+    case 'cancelada':
+      return 'Olá '+res.customerName+', informamos que sua reserva '+res.id+' do produto '+name+' foi cancelada. Qualquer dúvida, estamos à disposição.';
+    case 'expirada':
+      return 'Olá '+res.customerName+', sua reserva '+res.id+' do produto '+name+' expirou pois o prazo foi atingido. A peça está disponível novamente caso tenha interesse.';
+    case 'vendida':
+      return 'Olá '+res.customerName+', confirmamos a venda do produto '+name+' (reserva '+res.id+'). Em breve enviaremos os detalhes de envio/retirada. Obrigado pela preferência!';
+    default:
+      return 'Olá! Gostaria de confirmar minha reserva.\n\nReserva nº '+res.id+'\nProduto: '+name+'\nCódigo: '+code+'\n\nNome: '+res.customerName+'\n\nObrigado!';
+  }
+}
+
+function formatPrice(v){ return 'R$ '+v.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2}); }
+function formatDate(ts){ return new Date(ts).toLocaleDateString('pt-BR'); }
+function formatTime(ts){ return new Date(ts).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}); }
+function isSameDay(a,b){ const A=new Date(a),B=new Date(b); return A.getFullYear()===B.getFullYear()&&A.getMonth()===B.getMonth()&&A.getDate()===B.getDate(); }
+function formatRemaining(ms){
+  if(ms<=0) return 'Expirada';
+  const d=Math.floor(ms/86400000), h=Math.floor((ms%86400000)/3600000), m=Math.floor((ms%3600000)/60000);
+  if(d>0) return d+'d '+h+'h';
+  if(h>0) return h+'h '+m+'m';
+  return m+'m';
+}
+const ACTIVE_STATUSES = ['reservada','pagamento_pendente','confirmada'];
+
+class Component extends DCLogic {
+  state = {
+    view: 'client',
+    clientScreen: 'catalog',
+    selectedProductId: null,
+    showReserveModal: false,
+    form: {name:'', whatsapp:'', email:'', city:'', state:'', notes:''},
+    formErrors: {},
+    lastReservationId: null,
+    reservations: buildSeedReservations(Date.now()),
+    nextNumber: 155,
+    now: Date.now(),
+    toasts: [],
+    role: 'admin',
+    defaultDurationIndex: 4,
+    search: '',
+    statusFilter: 'all',
+    dateFilter: 'all',
+    detailId: null,
+    editModal: null,
+    confirmModal: null
+  };
+
+  componentDidMount(){ this.timer = setInterval(()=>this.tick(), 1000); }
+  componentWillUnmount(){ clearInterval(this.timer); }
+
+  tick(){
+    const now = Date.now();
+    let expiredIds = [];
+    this.setState(s=>{
+      const reservations = s.reservations.map(r=>{
+        if(ACTIVE_STATUSES.indexOf(r.status)!==-1 && r.expiresAt<=now){
+          expiredIds.push(r.id);
+          return {...r, status:'expirada', history:[...r.history, {ts:now, action:'Reserva expirada automaticamente', user:'Sistema'}]};
+        }
+        return r;
+      });
+      return {reservations, now};
+    });
+    if(expiredIds.length){ expiredIds.forEach(id=>this.addToast('Reserva '+id+' expirou automaticamente.')); }
+  }
+
+  addToast(msg){
+    const id = Date.now()+Math.random();
+    this.setState(s=>({toasts:[...s.toasts, {id, msg}]}));
+    setTimeout(()=>{ this.setState(s=>({toasts:s.toasts.filter(t=>t.id!==id)})); }, 3500);
+  }
+
+  getActiveReservation(pid){ return this.state.reservations.find(r=>r.productId===pid && ACTIVE_STATUSES.indexOf(r.status)!==-1); }
+  getSoldReservation(pid){ const arr=this.state.reservations.filter(r=>r.productId===pid && r.status==='vendida'); return arr[arr.length-1]; }
+  productStatus(pid){
+    const sold=this.getSoldReservation(pid);
+    if(sold) return {status:'vendida', reservation:sold};
+    const act=this.getActiveReservation(pid);
+    if(act) return {status:act.status, reservation:act};
+    return {status:'disponivel', reservation:null};
+  }
+
+  setView(v){ this.setState({view:v}); }
+  openProduct(id){ this.setState({clientScreen:'product', selectedProductId:id}); }
+  backToCatalog(){ this.setState({clientScreen:'catalog', selectedProductId:null}); }
+  openReserveModal(){ this.setState({showReserveModal:true, formErrors:{}}); }
+  closeReserveModal(){ this.setState({showReserveModal:false}); }
+  setFormField(field, val){ this.setState(s=>({form:{...s.form, [field]:val}})); }
+
+  submitReservation(){
+    const form = this.state.form;
+    const errors = {};
+    if(!form.name.trim()) errors.name = 'Informe o nome completo';
+    if(!form.whatsapp.trim()) errors.whatsapp = 'Informe o WhatsApp';
+    if(Object.keys(errors).length){ this.setState({formErrors:errors}); return; }
+    const pid = this.state.selectedProductId;
+    const st = this.productStatus(pid);
+    if(st.status!=='disponivel'){
+      this.addToast('Esta peça não está mais disponível.');
+      this.setState({showReserveModal:false, clientScreen:'catalog'});
+      return;
+    }
+    const now = Date.now();
+    const dur = DURATIONS[this.state.defaultDurationIndex].ms;
+    const number = this.state.nextNumber;
+    const id = 'RES-2026-'+String(number).padStart(6,'0');
+    const reservation = {id, productId:pid, customerName:form.name.trim(), whatsapp:form.whatsapp.trim(), email:form.email.trim(), city:form.city.trim(), state:form.state, notes:form.notes.trim(), createdAt:now, expiresAt:now+dur, status:'reservada', history:[{ts:now, action:'Reserva criada', user:'Cliente'}]};
+    this.setState(s=>({
+      reservations:[...s.reservations, reservation],
+      nextNumber:s.nextNumber+1,
+      showReserveModal:false,
+      clientScreen:'confirmation',
+      lastReservationId:id,
+      form:{name:'', whatsapp:'', email:'', city:'', state:'', notes:''}
+    }));
+    this.addToast('Reserva '+id+' criada com sucesso.');
+  }
+
+  backToShop(){ this.setState({clientScreen:'catalog', selectedProductId:null, lastReservationId:null}); }
+
+  setRole(v){ this.setState({role:v}); }
+  setDefaultDuration(i){ this.setState({defaultDurationIndex:Number(i)}); }
+  setSearch(v){ this.setState({search:v}); }
+  setStatusFilter(v){ this.setState({statusFilter:v}); }
+  setDateFilter(v){ this.setState({dateFilter:v}); }
+
+  logAction(id, action){
+    this.setState(s=>({reservations:s.reservations.map(r=>r.id===id?{...r, history:[...r.history, {ts:Date.now(), action, user:'Admin'}]}:r)}));
+  }
+
+  quickSetStatus(id, status){
+    this.setState(s=>({reservations:s.reservations.map(r=>r.id===id?{...r, status, history:[...r.history, {ts:Date.now(), action:'Status alterado para '+STATUS_META[status].label, user:'Admin'}]}:r)}));
+    this.addToast('Status atualizado.');
+  }
+
+  askConfirm(title, message, confirmLabel, action){ this.setState({confirmModal:{title, message, confirmLabel, action}}); }
+  runConfirm(){ const cm=this.state.confirmModal; if(cm) cm.action(); this.setState({confirmModal:null}); }
+  cancelConfirm(){ this.setState({confirmModal:null}); }
+
+  deleteReservation(id){ this.setState(s=>({reservations:s.reservations.filter(r=>r.id!==id)})); this.addToast('Reserva excluída.'); }
+
+  openDetail(id){ this.setState({detailId:id}); }
+  closeDetail(){ this.setState({detailId:null}); }
+  openEdit(id){
+    const r = this.state.reservations.find(x=>x.id===id);
+    if(!r) return;
+    this.setState({editModal:{id, status:r.status, durationIndex:this.state.defaultDurationIndex, notes:r.notes}});
+  }
+  closeEdit(){ this.setState({editModal:null}); }
+  setEditField(f, v){ this.setState(s=>({editModal:{...s.editModal, [f]:v}})); }
+  saveEdit(){
+    const em = this.state.editModal;
+    if(!em) return;
+    const dur = DURATIONS[em.durationIndex].ms;
+    this.setState(s=>({
+      reservations: s.reservations.map(r=>r.id===em.id?{...r, status:em.status, notes:em.notes, expiresAt: Date.now()+dur, history:[...r.history, {ts:Date.now(), action:'Reserva editada pelo administrador', user:'Admin'}]}:r),
+      editModal: null
+    }));
+    this.addToast('Reserva atualizada.');
+  }
+
+  sendWhatsApp(id){
+    const r = this.state.reservations.find(x=>x.id===id);
+    if(!r) return;
+    const p = PRODUCTS_SEED.find(x=>x.id===r.productId);
+    const msg = buildMessage(r, p);
+    const digits = r.whatsapp.replace(/\D/g,'');
+    const link = 'https://wa.me/55'+digits+'?text='+encodeURIComponent(msg);
+    window.open(link, '_blank');
+    this.logAction(id, 'Mensagem de WhatsApp enviada');
+  }
+
+  onExport(){ this.addToast('Exportação simulada — conectar a um backend real para exportar de fato.'); }
+
+  renderVals(){
+    const s = this.state;
+    const now = s.now || Date.now();
+    const isAdmin = s.role === 'admin';
+
+    const product = s.selectedProductId ? PRODUCTS_SEED.find(p=>p.id===s.selectedProductId) : null;
+
+    const catalogProducts = PRODUCTS_SEED.map(p=>{
+      const st = this.productStatus(p.id);
+      const meta = STATUS_META[st.status];
+      return {
+        id:p.id, name:p.name, brand:p.brand, size:p.size,
+        priceFmt: formatPrice(p.price),
+        photoLabel: 'foto — '+p.photoLabel,
+        showBadge: st.status!=='disponivel',
+        badgeBg: meta.bg, badgeFg: meta.fg, badgeLabel: meta.label,
+        onOpen: ()=>this.openProduct(p.id)
+      };
+    });
+
+    let sp = null;
+    if(product){
+      const st = this.productStatus(product.id);
+      const meta = STATUS_META[st.status];
+      const available = st.status==='disponivel';
+      let unavailableMsg = '';
+      if(st.status==='vendida') unavailableMsg = 'Esta peça já foi vendida.';
+      else if(st.status!=='disponivel') unavailableMsg = 'Esta peça já está reservada.';
+      sp = {
+        name:product.name, category:product.category, brand:product.brand, color:product.color,
+        size:product.size, condition:product.condition, code:product.code,
+        priceFmt: formatPrice(product.price),
+        photoLabel: 'foto — '+product.photoLabel,
+        badgeBg: meta.bg, badgeFg: meta.fg, badgeLabel: meta.label,
+        available, unavailable: !available, unavailableMsg
+      };
+    }
+
+    let conf = null;
+    if(s.lastReservationId){
+      const r = s.reservations.find(x=>x.id===s.lastReservationId);
+      if(r){
+        const p = PRODUCTS_SEED.find(x=>x.id===r.productId);
+        const digits = r.whatsapp.replace(/\D/g,'');
+        conf = {
+          code:r.id, dateFmt:formatDate(r.createdAt), timeFmt:formatTime(r.createdAt),
+          remainingFmt: formatRemaining(r.expiresAt-now),
+          waLink: 'https://wa.me/55'+digits+'?text='+encodeURIComponent(buildMessage(r,p))
+        };
+      }
+    }
+
+    // admin metrics
+    const total = s.reservations.length;
+    const todayCount = s.reservations.filter(r=>isSameDay(r.createdAt, now)).length;
+    const activeCount = s.reservations.filter(r=>ACTIVE_STATUSES.indexOf(r.status)!==-1).length;
+    const expiredCount = s.reservations.filter(r=>r.status==='expirada').length;
+    const soldReservations = s.reservations.filter(r=>r.status==='vendida');
+    const soldCount = soldReservations.length;
+    const withConfirm = s.reservations.filter(r=>r.confirmedAt);
+    const avgConfirmMs = withConfirm.length ? withConfirm.reduce((a,r)=>a+(r.confirmedAt-r.createdAt),0)/withConfirm.length : 0;
+    const conversionRate = total ? Math.round((soldCount/total)*100) : 0;
+    const valueReserved = s.reservations.filter(r=>ACTIVE_STATUSES.indexOf(r.status)!==-1).reduce((a,r)=>{ const p=PRODUCTS_SEED.find(x=>x.id===r.productId); return a+(p?p.price:0); },0);
+    const valueSold = soldReservations.reduce((a,r)=>{ const p=PRODUCTS_SEED.find(x=>x.id===r.productId); return a+(p?p.price:0); },0);
+
+    const metricCards = [
+      {label:'Reservas hoje', value:String(todayCount)},
+      {label:'Reservas ativas', value:String(activeCount)},
+      {label:'Reservas expiradas', value:String(expiredCount)},
+      {label:'Reservas concluídas', value:String(soldCount)},
+      {label:'Produtos vendidos', value:String(soldCount)},
+      {label:'Tempo médio p/ confirmação', value: avgConfirmMs ? formatRemaining(avgConfirmMs) : '—'},
+      {label:'Taxa de conversão', value: conversionRate+'%'},
+      {label:'Valor reservado', value: formatPrice(valueReserved)},
+      {label:'Valor vendido', value: formatPrice(valueSold)}
+    ];
+
+    // chart: days
+    const dayNames = ['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'];
+    const dayBuckets = [];
+    for(let i=6;i>=0;i--){
+      const dayStart = now - i*86400000;
+      const count = s.reservations.filter(r=>isSameDay(r.createdAt, dayStart)).length;
+      dayBuckets.push({label:dayNames[new Date(dayStart).getDay()], value:count});
+    }
+    const maxDay = Math.max(1, ...dayBuckets.map(d=>d.value));
+    const chartDays = dayBuckets.map(d=>({label:d.label, value:d.value, pct: Math.max(6, Math.round((d.value/maxDay)*100))+'%'}));
+
+    // chart: products
+    const prodCounts = {};
+    s.reservations.forEach(r=>{ prodCounts[r.productId] = (prodCounts[r.productId]||0)+1; });
+    const prodArr = Object.keys(prodCounts).map(pid=>{ const p=PRODUCTS_SEED.find(x=>x.id===pid); return {label:p?p.name:pid, value:prodCounts[pid]}; }).sort((a,b)=>b.value-a.value).slice(0,5);
+    const maxProd = Math.max(1, ...prodArr.map(p=>p.value));
+    const chartProducts = prodArr.map(p=>({label:p.label, value:p.value, pct:Math.round((p.value/maxProd)*100)+'%'}));
+
+    // chart: categories
+    const catCounts = {};
+    s.reservations.forEach(r=>{ const p=PRODUCTS_SEED.find(x=>x.id===r.productId); if(p) catCounts[p.category]=(catCounts[p.category]||0)+1; });
+    const catArr = Object.keys(catCounts).map(c=>({label:c, value:catCounts[c]})).sort((a,b)=>b.value-a.value).slice(0,5);
+    const maxCat = Math.max(1, ...catArr.map(c=>c.value));
+    const chartCategories = catArr.map(c=>({label:c.label, value:c.value, pct:Math.round((c.value/maxCat)*100)+'%'}));
+
+    // chart: hours
+    const hourBuckets = [{label:'Madrugada (0-6h)', min:0, max:6, value:0}, {label:'Manhã (6-12h)', min:6, max:12, value:0}, {label:'Tarde (12-18h)', min:12, max:18, value:0}, {label:'Noite (18-24h)', min:18, max:24, value:0}];
+    s.reservations.forEach(r=>{ const h=new Date(r.createdAt).getHours(); const b=hourBuckets.find(x=>h>=x.min&&h<x.max); if(b) b.value++; });
+    const maxHour = Math.max(1, ...hourBuckets.map(h=>h.value));
+    const chartHours = hourBuckets.map(h=>({label:h.label, value:h.value, pct:Math.max(6, Math.round((h.value/maxHour)*100))+'%'}));
+
+    // table rows
+    const statusFilterOptions = [{value:'all', label:'Todos os status'}].concat(Object.keys(STATUS_META).map(k=>({value:k, label:STATUS_META[k].label})));
+    const dateFilterDefs = [{value:'all', label:'Todas'}, {value:'today', label:'Hoje'}, {value:'yesterday', label:'Ontem'}, {value:'7d', label:'7 dias'}, {value:'30d', label:'30 dias'}];
+    const dateFilterOptions = dateFilterDefs.map(d=>({
+      label:d.label,
+      onClick: ()=>this.setDateFilter(d.value),
+      style: 'padding:8px 12px; border-radius:8px; border:none; font-size:11.5px; font-weight:600; cursor:pointer; background:'+(s.dateFilter===d.value?'linear-gradient(135deg, #8b5a42 0%, #a0695a 100%)':'transparent')+'; color:'+(s.dateFilter===d.value?'#fff':'#1a1410')+'; transition:all .2s ease;'
+    }));
+
+    const query = s.search.trim().toLowerCase();
+    let filtered = s.reservations.filter(r=>{
+      const p = PRODUCTS_SEED.find(x=>x.id===r.productId);
+      if(s.statusFilter!=='all' && r.status!==s.statusFilter) return false;
+      if(s.dateFilter==='today' && !isSameDay(r.createdAt, now)) return false;
+      if(s.dateFilter==='yesterday' && !isSameDay(r.createdAt, now-86400000)) return false;
+      if(s.dateFilter==='7d' && now-r.createdAt>7*86400000) return false;
+      if(s.dateFilter==='30d' && now-r.createdAt>30*86400000) return false;
+      if(query){
+        const hay = [r.customerName, r.whatsapp, r.city, r.state, p?p.name:'', p?p.code:'', p?p.brand:'', p?p.category:'', STATUS_META[r.status].label].join(' ').toLowerCase();
+        if(hay.indexOf(query)===-1) return false;
+      }
+      return true;
+    }).sort((a,b)=>b.createdAt-a.createdAt);
+
+    const tableRows = filtered.map(r=>{
+      const p = PRODUCTS_SEED.find(x=>x.id===r.productId);
+      const meta = STATUS_META[r.status];
+      const remainMs = r.expiresAt-now;
+      const isActive = ACTIVE_STATUSES.indexOf(r.status)!==-1;
+      const urgent = isActive && remainMs>0 && remainMs<2*3600000;
+      const canCritical = isAdmin;
+      return {
+        id:r.id, customerName:r.customerName, productName:p?p.name:'—', code:p?p.code:'—', whatsapp:r.whatsapp, city:r.city, state:r.state,
+        dateFmt:formatDate(r.createdAt), timeFmt:formatTime(r.createdAt),
+        remainingFmt: isActive ? formatRemaining(remainMs) : '—',
+        remainingColor: urgent ? '#c85a5a' : '#1a1410',
+        statusLabel:meta.label, statusBg:meta.bg, statusFg:meta.fg,
+        valueFmt: formatPrice(p?p.price:0),
+        onView: ()=>this.openDetail(r.id),
+        onEdit: ()=>this.openEdit(r.id),
+        onConfirm: ()=>this.quickSetStatus(r.id, 'confirmada'),
+        confirmDisabled: !(r.status==='reservada'||r.status==='pagamento_pendente'),
+        confirmOpacity: (r.status==='reservada'||r.status==='pagamento_pendente') ? '1' : '.4',
+        onSold: ()=>this.askConfirm('Marcar como vendido?', 'O produto '+(p?p.name:'')+' será marcado como vendido e a reserva encerrada.', 'Marcar vendido', ()=>this.quickSetStatus(r.id,'vendida')),
+        soldDisabled: !isActive,
+        soldOpacity: isActive ? '1' : '.4',
+        onCancel: ()=>this.askConfirm('Cancelar reserva?', 'A peça voltará a ficar disponível para outros clientes.', 'Cancelar reserva', ()=>this.quickSetStatus(r.id,'cancelada')),
+        cancelDisabled: !isActive || !canCritical,
+        cancelOpacity: (isActive && canCritical) ? '1' : '.4',
+        onWhatsapp: ()=>this.sendWhatsApp(r.id),
+        onDelete: ()=>this.askConfirm('Excluir reserva?', 'Esta ação é permanente e não pode ser desfeita.', 'Excluir', ()=>this.deleteReservation(r.id)),
+        deleteDisabled: !canCritical,
+        deleteOpacity: canCritical ? '1' : '.4'
+      };
+    });
+
+    let detail = null;
+    if(s.detailId){
+      const r = s.reservations.find(x=>x.id===s.detailId);
+      if(r){
+        const p = PRODUCTS_SEED.find(x=>x.id===r.productId);
+        const meta = STATUS_META[r.status];
+        const isActive = ACTIVE_STATUSES.indexOf(r.status)!==-1;
+        detail = {
+          id:r.id, statusLabel:meta.label, statusBg:meta.bg, statusFg:meta.fg,
+          productName:p?p.name:'—', productBrand:p?p.brand:'', productCode:p?p.code:'', valueFmt:formatPrice(p?p.price:0),
+          customerName:r.customerName, whatsapp:r.whatsapp, email:r.email||'—', city:r.city, state:r.state, notes:r.notes||'—',
+          createdFmt: formatDate(r.createdAt)+' · '+formatTime(r.createdAt),
+          updatedFmt: r.history.length ? formatDate(r.history[r.history.length-1].ts)+' · '+formatTime(r.history[r.history.length-1].ts) : '—',
+          remainingFmt: isActive ? formatRemaining(r.expiresAt-now) : '—',
+          history: r.history.slice().reverse().map(h=>({action:h.action, when:formatDate(h.ts)+' '+formatTime(h.ts), user:h.user}))
+        };
+      }
+    }
+
+    let editModal = null;
+    if(s.editModal){
+      editModal = s.editModal;
+    }
+    const editStatusOptions = Object.keys(STATUS_META).map(k=>({value:k, label:STATUS_META[k].label}));
+    const durationOptions = DURATIONS.map((d,i)=>({index:i, label:d.label}));
+    const ufOptions = UF_LIST;
+
+    return {
+      isClientView: s.view==='client', isAdminView: s.view==='admin',
+      setViewClient: ()=>this.setView('client'), setViewAdmin: ()=>this.setView('admin'),
+      clientBtnStyle: 'padding:10px 18px; border:none; border-radius:999px; font-size:13px; font-weight:700; cursor:pointer; background:'+(s.view==='client'?'linear-gradient(135deg, #8b5a42 0%, #a0695a 100%)':'transparent')+'; color:'+(s.view==='client'?'#fff':'#1a1410')+'; transition:all .2s ease; font-family:\'Manrope\',sans-serif;',
+      adminBtnStyle: 'padding:10px 18px; border:none; border-radius:999px; font-size:13px; font-weight:700; cursor:pointer; background:'+(s.view==='admin'?'linear-gradient(135deg, #8b5a42 0%, #a0695a 100%)':'transparent')+'; color:'+(s.view==='admin'?'#fff':'#1a1410')+'; transition:all .2s ease; font-family:\'Manrope\',sans-serif;',
+      toasts: s.toasts,
+
+      screenIsCatalog: s.clientScreen==='catalog', screenIsProduct: s.clientScreen==='product', screenIsConfirmation: s.clientScreen==='confirmation',
+      catalogProducts, sp,
+      openProduct: (id)=>this.openProduct(id), backToCatalog: ()=>this.backToCatalog(),
+      openReserveModal: ()=>this.openReserveModal(), closeReserveModal: ()=>this.closeReserveModal(),
+      showReserveModal: s.showReserveModal,
+      form: s.form, errors: s.formErrors, ufOptions,
+      onNameChange: (e)=>this.setFormField('name', e.target.value),
+      onWhatsappChange: (e)=>this.setFormField('whatsapp', e.target.value),
+      onEmailChange: (e)=>this.setFormField('email', e.target.value),
+      onCityChange: (e)=>this.setFormField('city', e.target.value),
+      onStateChange: (e)=>this.setFormField('state', e.target.value),
+      onNotesChange: (e)=>this.setFormField('notes', e.target.value),
+      submitReservation: ()=>this.submitReservation(),
+      conf, backToShop: ()=>this.backToShop(),
+
+      role: s.role, onRoleChange: (e)=>this.setRole(e.target.value),
+      defaultDurationIndex: s.defaultDurationIndex, onDurationChange: (e)=>this.setDefaultDuration(e.target.value),
+      durationDisabled: !isAdmin, durationOptions,
+      metricCards, chartDays, chartProducts, chartCategories, chartHours,
+      search: s.search, onSearchChange: (e)=>this.setSearch(e.target.value),
+      statusFilter: s.statusFilter, onStatusFilterChange: (e)=>this.setStatusFilter(e.target.value), statusFilterOptions,
+      dateFilterOptions, onExport: ()=>this.onExport(),
+      tableRows, tableEmpty: tableRows.length===0,
+
+      detail, closeDetail: ()=>this.closeDetail(),
+      editModal, closeEdit: ()=>this.closeEdit(), saveEdit: ()=>this.saveEdit(),
+      onEditStatusChange: (e)=>this.setEditField('status', e.target.value),
+      onEditDurationChange: (e)=>this.setEditField('durationIndex', Number(e.target.value)),
+      onEditNotesChange: (e)=>this.setEditField('notes', e.target.value),
+      editStatusOptions,
+      confirmModal: s.confirmModal, runConfirm: ()=>this.runConfirm(), cancelConfirm: ()=>this.cancelConfirm()
+    };
+  }
+}
+
+</script>
+</body>
+</html>
