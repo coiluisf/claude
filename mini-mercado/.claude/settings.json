@@ -1,0 +1,17 @@
+{
+  "version": "1.0",
+  "description": "Mini Mercado - E-commerce System",
+  "permissions": {
+    "allow": [
+      "bash",
+      "npm",
+      "node"
+    ]
+  },
+  "hooks": {
+    "session-start": {
+      "command": "echo '🚀 Mini Mercado - Iniciando setup...' && echo '' && echo '📦 Instalando dependências backend...' && cd mini-mercado/backend && npm install --silent && echo '✅ Backend pronto' && echo '' && echo '📦 Instalando dependências frontend...' && cd ../frontend && npm install --silent && echo '✅ Frontend pronto' && echo '' && echo '🌱 Populando banco de dados...' && cd ../backend && npm run seed && echo '' && echo '🎉 Tudo pronto! Execute os comandos:' && echo 'Terminal 1: cd mini-mercado/backend && npm run dev' && echo 'Terminal 2: cd mini-mercado/frontend && npm run dev'",
+      "enabled": true
+    }
+  }
+}
