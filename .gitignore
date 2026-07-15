@@ -1,3 +1,4 @@
 __pycache__/
 .claude/
-frontend/
+# Não ignorar frontend do mini-mercado
+!/mini-mercado/frontend/
