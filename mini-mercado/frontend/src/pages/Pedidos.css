@@ -1,0 +1,275 @@
+.pedidos {
+  max-width: 1000px;
+  margin: 0 auto;
+  padding: 40px 20px;
+}
+
+.pedidos h1 {
+  font-size: 2rem;
+  color: #333;
+  margin-bottom: 30px;
+}
+
+.pedidos-lista {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.pedido-card {
+  background: white;
+  border-radius: 10px;
+  padding: 25px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+  transition: transform 0.3s, box-shadow 0.3s;
+}
+
+.pedido-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 5px 20px rgba(0, 0, 0, 0.15);
+}
+
+.pedido-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 20px;
+  padding-bottom: 15px;
+  border-bottom: 1px solid #eee;
+}
+
+.pedido-id h3 {
+  margin: 0 0 5px 0;
+  color: #333;
+  font-size: 1.3rem;
+}
+
+.pedido-id .data {
+  color: #999;
+  font-size: 0.9rem;
+}
+
+.status-badge {
+  color: white;
+  padding: 8px 16px;
+  border-radius: 20px;
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.pedido-info {
+  margin-bottom: 20px;
+  color: #666;
+}
+
+.pedido-info p {
+  margin: 8px 0;
+  display: flex;
+  gap: 10px;
+}
+
+.pedido-info strong {
+  color: #333;
+  min-width: 100px;
+}
+
+.pedido-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-top: 20px;
+  border-top: 1px solid #eee;
+}
+
+.total {
+  font-size: 1.5rem;
+  font-weight: bold;
+  color: #667eea;
+}
+
+.detalhes-btn {
+  padding: 10px 20px;
+  background: #667eea;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.9rem;
+  font-weight: 600;
+  transition: background 0.3s;
+}
+
+.detalhes-btn:hover {
+  background: #5568d3;
+}
+
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.modal {
+  background: white;
+  border-radius: 10px;
+  width: 90%;
+  max-width: 600px;
+  max-height: 80vh;
+  overflow-y: auto;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+}
+
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 25px;
+  border-bottom: 1px solid #eee;
+  position: sticky;
+  top: 0;
+  background: white;
+}
+
+.modal-header h2 {
+  margin: 0;
+  color: #333;
+}
+
+.fechar-btn {
+  background: transparent;
+  border: none;
+  font-size: 1.5rem;
+  cursor: pointer;
+  color: #999;
+  transition: color 0.2s;
+}
+
+.fechar-btn:hover {
+  color: #333;
+}
+
+.modal-content {
+  padding: 25px;
+}
+
+.secao-modal {
+  margin-bottom: 25px;
+}
+
+.secao-modal:last-child {
+  margin-bottom: 0;
+}
+
+.secao-modal h3 {
+  color: #333;
+  font-size: 1.1rem;
+  margin: 0 0 15px 0;
+  border-bottom: 2px solid #667eea;
+  padding-bottom: 10px;
+}
+
+.secao-modal p {
+  margin: 10px 0;
+  color: #666;
+}
+
+.secao-modal strong {
+  color: #333;
+}
+
+.itens-tabela {
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.tabela-header {
+  display: grid;
+  grid-template-columns: 2fr 1fr 1fr 1fr;
+  gap: 15px;
+  background: #f5f5f5;
+  padding: 15px;
+  font-weight: 600;
+  color: #333;
+  border-bottom: 1px solid #ddd;
+}
+
+.tabela-row {
+  display: grid;
+  grid-template-columns: 2fr 1fr 1fr 1fr;
+  gap: 15px;
+  padding: 15px;
+  color: #666;
+  border-bottom: 1px solid #eee;
+}
+
+.tabela-row:last-child {
+  border-bottom: none;
+}
+
+.resumo-pedido {
+  background: #f5f5f5;
+  padding: 15px;
+  border-radius: 6px;
+  text-align: right;
+}
+
+.resumo-linha {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 10px;
+  color: #666;
+}
+
+.resumo-linha:last-child {
+  margin-bottom: 0;
+}
+
+.resumo-linha strong {
+  color: #667eea;
+  font-size: 1.2rem;
+}
+
+.vazio {
+  text-align: center;
+  padding: 60px 20px;
+  color: #999;
+  font-size: 1.1rem;
+}
+
+.loading {
+  text-align: center;
+  padding: 40px;
+  color: #666;
+}
+
+@media (max-width: 768px) {
+  .pedido-header {
+    flex-direction: column;
+    gap: 15px;
+  }
+
+  .pedido-footer {
+    flex-direction: column;
+    gap: 15px;
+    align-items: flex-start;
+  }
+
+  .tabela-header,
+  .tabela-row {
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+  }
+
+  .modal {
+    width: 95%;
+    max-height: 90vh;
+  }
+}

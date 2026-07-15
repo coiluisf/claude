@@ -1,0 +1,264 @@
+.carrinho {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 40px 20px;
+}
+
+.carrinho h1 {
+  font-size: 2rem;
+  color: #333;
+  margin-bottom: 30px;
+}
+
+.carrinho-vazio {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 40px 20px;
+}
+
+.vazio {
+  text-align: center;
+  padding: 60px 20px;
+  color: #999;
+}
+
+.vazio p {
+  font-size: 1.2rem;
+  margin: 10px 0;
+}
+
+.carrinho-container {
+  display: grid;
+  grid-template-columns: 1fr 350px;
+  gap: 30px;
+}
+
+.carrinho-items {
+  background: white;
+  border-radius: 10px;
+  overflow: hidden;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+}
+
+.carrinho-item {
+  display: grid;
+  grid-template-columns: 1fr 100px 150px 150px 50px;
+  align-items: center;
+  gap: 15px;
+  padding: 20px;
+  border-bottom: 1px solid #eee;
+}
+
+.carrinho-item:last-child {
+  border-bottom: none;
+}
+
+.item-info h3 {
+  margin: 0;
+  color: #333;
+  font-size: 1.1rem;
+}
+
+.item-info .categoria {
+  color: #999;
+  font-size: 0.9rem;
+  margin: 5px 0 0 0;
+}
+
+.item-preco {
+  text-align: right;
+}
+
+.item-quantidade {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  background: #f5f5f5;
+  border-radius: 6px;
+  padding: 5px;
+}
+
+.item-quantidade button {
+  width: 30px;
+  height: 30px;
+  border: none;
+  background: white;
+  cursor: pointer;
+  border-radius: 4px;
+  font-size: 1.1rem;
+  transition: background 0.2s;
+}
+
+.item-quantidade button:hover {
+  background: #e0e0e0;
+}
+
+.item-quantidade input {
+  width: 50px;
+  text-align: center;
+  border: none;
+  background: transparent;
+  font-size: 1rem;
+}
+
+.item-total {
+  text-align: right;
+  font-weight: bold;
+  color: #667eea;
+}
+
+.remover-btn {
+  background: transparent;
+  border: none;
+  font-size: 1.2rem;
+  cursor: pointer;
+  transition: transform 0.2s;
+}
+
+.remover-btn:hover {
+  transform: scale(1.1);
+}
+
+.checkout-panel {
+  background: white;
+  border-radius: 10px;
+  padding: 25px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+  height: fit-content;
+  position: sticky;
+  top: 100px;
+}
+
+.checkout-panel h2 {
+  margin-top: 0;
+  color: #333;
+  font-size: 1.3rem;
+}
+
+.secao {
+  margin-bottom: 20px;
+}
+
+.secao h3 {
+  font-size: 1rem;
+  color: #333;
+  margin: 0 0 10px 0;
+}
+
+.secao label {
+  display: block;
+  color: #333;
+  font-weight: 500;
+  margin-bottom: 8px;
+}
+
+.secao input[type="text"],
+.secao input[type="email"],
+.secao textarea {
+  width: 100%;
+  padding: 10px;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  font-size: 1rem;
+  box-sizing: border-box;
+  font-family: inherit;
+}
+
+.secao input:focus,
+.secao textarea:focus {
+  outline: none;
+  border-color: #667eea;
+  box-shadow: 0 0 0 2px rgba(102, 126, 234, 0.1);
+}
+
+.radio-group {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.radio-group label {
+  display: flex;
+  align-items: center;
+  margin: 0;
+  cursor: pointer;
+}
+
+.radio-group input[type="radio"] {
+  margin-right: 10px;
+  cursor: pointer;
+}
+
+.resumo {
+  background: #f5f5f5;
+  padding: 15px;
+  border-radius: 6px;
+  margin-bottom: 20px;
+}
+
+.resumo-linha {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 10px;
+  color: #333;
+}
+
+.resumo-linha:last-child {
+  margin-bottom: 0;
+}
+
+.resumo-linha.total {
+  font-weight: bold;
+  font-size: 1.2rem;
+  color: #667eea;
+  border-top: 1px solid #ddd;
+  padding-top: 10px;
+  margin-top: 10px;
+}
+
+.checkout-btn {
+  width: 100%;
+  padding: 14px;
+  background: #667eea;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  font-size: 1.1rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.3s;
+}
+
+.checkout-btn:hover:not(:disabled) {
+  background: #5568d3;
+}
+
+.checkout-btn:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+@media (max-width: 768px) {
+  .carrinho-container {
+    grid-template-columns: 1fr;
+  }
+
+  .checkout-panel {
+    position: static;
+  }
+
+  .carrinho-item {
+    grid-template-columns: 1fr;
+    gap: 10px;
+    text-align: left;
+  }
+
+  .item-preco,
+  .item-total {
+    text-align: left;
+  }
+
+  .item-quantidade {
+    justify-content: space-between;
+  }
+}
